@@ -18,11 +18,11 @@ class RefineryConfig:
     langsmith_api_url: str = "https://api.smith.langchain.com"
     
     # LLM Configuration
-    llm_provider: str = "openai"  # openai, anthropic, azure_openai
+    llm_provider: str = "openai"  # openai, anthropic, azure_openai, gemini
     
     # OpenAI
     openai_api_key: Optional[str] = None
-    openai_model: str = "gpt-4-turbo-preview"
+    openai_model: str = "gpt-4o"
     
     # Anthropic
     anthropic_api_key: Optional[str] = None
@@ -32,6 +32,10 @@ class RefineryConfig:
     azure_openai_api_key: Optional[str] = None
     azure_openai_endpoint: Optional[str] = None
     azure_openai_deployment: Optional[str] = None
+    
+    # Gemini
+    gemini_api_key: Optional[str] = None
+    gemini_model: str = "gemini-2.0-flash"
     
     # General settings
     log_level: str = "INFO"
@@ -51,12 +55,14 @@ class RefineryConfig:
             langsmith_api_url=os.getenv("LANGSMITH_API_URL", "https://api.smith.langchain.com"),
             llm_provider=os.getenv("LLM_PROVIDER", "openai"),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
-            openai_model=os.getenv("OPENAI_MODEL", "gpt-4-turbo-preview"),
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-4o"),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-3-opus-20240229"),
             azure_openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
             azure_openai_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             azure_openai_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+            gemini_api_key=os.getenv("GEMINI_API_KEY"),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             debug=os.getenv("DEBUG", "false").lower() == "true",
             cache_ttl=int(os.getenv("CACHE_TTL", "900")),
@@ -79,6 +85,9 @@ class RefineryConfig:
         if self.llm_provider == "azure_openai":
             if not all([self.azure_openai_api_key, self.azure_openai_endpoint, self.azure_openai_deployment]):
                 raise ValueError("Azure OpenAI requires API key, endpoint, and deployment")
+        
+        if self.llm_provider == "gemini" and not self.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY is required when using Gemini provider")
 
 
 # Global config instance

@@ -16,6 +16,7 @@ from ..agents.failure_analyst import AdvancedFailureAnalyst
 from ..agents.hypothesis_generator import AdvancedHypothesisGenerator
 from ..analysis.simple_code_reader import build_simple_context
 from ..knowledge.gpt41_patterns import gpt41_knowledge
+# Removed AgentContextResolver - using simple file passing instead
 
 logger = structlog.get_logger(__name__)
 
@@ -30,6 +31,7 @@ class RefineryOrchestrator:
         self.code_manager = SafeCodeManager(codebase_path)
         self.failure_analyst = AdvancedFailureAnalyst()
         self.hypothesis_generator = AdvancedHypothesisGenerator()
+# Removed AgentContextResolver - using simple file passing instead
     
     async def _init_async(self):
         """Initialize async components."""
@@ -41,7 +43,9 @@ class RefineryOrchestrator:
         trace_id: str, 
         project: str,
         expected_behavior: str,
-        business_context: Optional[str] = None
+        business_context: Optional[str] = None,
+        prompt_contents: Optional[dict] = None,
+        eval_contents: Optional[dict] = None
     ) -> Diagnosis:
         """Analyze a failed trace and provide diagnosis."""
         logger.info("Starting failure analysis", trace_id=trace_id, project=project)
@@ -53,28 +57,35 @@ class RefineryOrchestrator:
         trace = await self.langsmith_client.fetch_trace(trace_id)
         logger.info("Fetched trace", runs_count=len(trace.runs))
         
-        # 2. Read customer implementation context
-        customer_context = await build_simple_context(self.codebase_path)
-        logger.info("Analyzed customer codebase", 
-                   prompt_files=len(customer_context.prompt_files),
-                   eval_files=len(customer_context.eval_files))
+        # 2. Log provided files
+        prompt_file_count = len(prompt_contents or {})
+        eval_file_count = len(eval_contents or {})
+        logger.info("Using provided files", 
+                   prompt_files=prompt_file_count,
+                   eval_files=eval_file_count)
         
-        # 3. Create domain expert expectation with implementation context
+        # 3. Create domain expert expectation
         expectation = DomainExpertExpectation(
             description=expected_behavior,
             business_context=business_context
         )
         
-        # 4. Analyze the trace with customer context
-        trace_analysis = await self.failure_analyst.analyze_trace(trace, expectation)
+        # 4. Analyze the trace with provided files
+        trace_analysis = await self.failure_analyst.analyze_trace(
+            trace, expectation, prompt_contents, eval_contents
+        )
         logger.info("Completed trace analysis")
         
         # 5. Compare to expected behavior
-        gap_analysis = await self.failure_analyst.compare_to_expected(trace_analysis, expectation)
+        gap_analysis = await self.failure_analyst.compare_to_expected(
+            trace_analysis, expectation, prompt_contents, eval_contents
+        )
         logger.info("Completed gap analysis")
         
-        # 6. Diagnose the failure with implementation awareness
-        diagnosis = await self.failure_analyst.diagnose_failure(trace_analysis, gap_analysis)
+        # 6. Diagnose the failure
+        diagnosis = await self.failure_analyst.diagnose_failure(
+            trace_analysis, gap_analysis, prompt_contents, eval_contents
+        )
         logger.info("Completed diagnosis", failure_type=diagnosis.failure_type.value)
         
         return diagnosis

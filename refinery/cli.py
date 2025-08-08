@@ -39,14 +39,143 @@ def main(debug: bool, config_file: str):
 @click.option('--expected', required=True, help='What should have happened')
 @click.option('--context', help='Additional business context')
 @click.option('--codebase', default='.', help='Path to codebase')
-def analyze(trace_id: str, project: str, expected: str, context: str, codebase: str):
+@click.option('--prompt-files', multiple=True, help='Prompt files to analyze')
+@click.option('--eval-files', multiple=True, help='Evaluation files to analyze')
+@click.option('--config-files', multiple=True, help='Configuration files to analyze')
+# Context management options (same as fix command)
+@click.option('--add-prompt', multiple=True, help='Add prompt files to saved context')
+@click.option('--add-eval', multiple=True, help='Add eval files to saved context')
+@click.option('--remove-prompt', multiple=True, help='Remove prompt files from saved context')
+@click.option('--remove-eval', multiple=True, help='Remove eval files from saved context')
+@click.option('--update', is_flag=True, help='Replace saved context instead of appending')
+# Option to extract prompts from trace
+@click.option('--extract-from-trace', is_flag=True, help='Extract and save prompts from the trace itself')
+def analyze(trace_id: str, project: str, expected: str, context: str, codebase: str, 
+            prompt_files: tuple, eval_files: tuple, config_files: tuple,
+            add_prompt: tuple, add_eval: tuple, remove_prompt: tuple, remove_eval: tuple,
+            update: bool, extract_from_trace: bool):
     """Analyze a failed trace and provide root cause diagnosis."""
     
     async def run_analysis():
+        codebase_abs = os.path.abspath(codebase)
+        context_manager = RefineryContext(codebase_abs)
+        
+        # Step 1: Handle context management (same as fix command)
+        try:
+            # Handle file removals first
+            if remove_prompt or remove_eval:
+                console.print("[blue]Removing files from context...[/blue]")
+                context_manager.remove_files(
+                    project,
+                    prompt_files=list(remove_prompt) if remove_prompt else None,
+                    eval_files=list(remove_eval) if remove_eval else None
+                )
+                console.print("✓ Files removed from context")
+            
+            # Handle file additions
+            if add_prompt or add_eval:
+                console.print("[blue]Adding files to context...[/blue]")
+                context_manager.create_or_update_context(
+                    project,
+                    prompt_files=list(add_prompt) if add_prompt else None,
+                    eval_files=list(add_eval) if add_eval else None,
+                    append=True  # Always append when using --add-*
+                )
+                console.print("✓ Files added to context")
+            
+            # Handle full file specification (create/update context)
+            if prompt_files or eval_files or config_files:
+                console.print("[blue]Updating context with specified files...[/blue]")
+                context_manager.create_or_update_context(
+                    project,
+                    prompt_files=list(prompt_files) if prompt_files else None,
+                    eval_files=list(eval_files) if eval_files else None,
+                    config_files=list(config_files) if config_files else None,
+                    append=not update
+                )
+                console.print("✓ Context updated")
+            
+            # Step 2: Optional - Extract prompts from trace and save them
+            if extract_from_trace:
+                console.print("[blue]Extracting prompts from trace...[/blue]")
+                orchestrator = await create_orchestrator(codebase_abs)
+                # Fetch the trace
+                trace = await orchestrator.langsmith_client.fetch_trace(trace_id)
+                # Extract prompts from the trace
+                extracted = orchestrator.langsmith_client.extract_prompts_from_trace(trace)
+                # Store extracted prompts as files
+                created_files = context_manager.store_trace_prompts(project, extracted, trace_id)
+                console.print(f"[green]✓ Extracted and saved {len(created_files['prompt_files'])} prompt files, "
+                            f"{len(created_files['eval_files'])} eval files[/green]")
+            
+            # Step 3: Load final context
+            project_context, context_exists = load_or_create_context(codebase_abs, project)
+            
+            # Validate we have files to work with
+            total_files = (len(project_context.get("prompt_files", [])) + 
+                          len(project_context.get("eval_files", [])))
+            
+            if total_files == 0:
+                console.print("[red]No files specified for analysis![/red]")
+                console.print("\nOptions:")
+                console.print("1. Specify files manually:")
+                console.print("   refinery analyze <trace> --project <name> --prompt-files <files> --eval-files <files>")
+                console.print("\n2. Extract from trace:")
+                console.print("   refinery analyze <trace> --project <name> --extract-from-trace")
+                console.print("\n3. Add files to existing project:")
+                console.print("   refinery analyze <trace> --project <name> --add-prompt <file>")
+                return
+            
+            # Show what files we're using
+            if context_exists:
+                console.print(f"[green]Using saved context for '{project}' ({total_files} files)[/green]")
+            else:
+                console.print(f"[yellow]Created new context for '{project}' ({total_files} files)[/yellow]")
+            
+            if config.debug:
+                console.print(f"Prompt files: {project_context.get('prompt_files', [])}")
+                console.print(f"Eval files: {project_context.get('eval_files', [])}")
+                
+        except Exception as e:
+            console.print(f"[red]Context management error: {e}[/red]")
+            return
+        
+        # Step 4: Read the actual file contents from saved context
+        prompt_contents = {}
+        eval_contents = {}
+        
+        # Get absolute file paths for reading
+        file_paths = context_manager.get_file_paths(project)
+        
+        # Read prompt files
+        if file_paths["prompt_files"]:
+            console.print("[blue]Reading prompt files from context...[/blue]")
+            for file_path in file_paths["prompt_files"]:
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        prompt_contents[file_path] = f.read()
+                    console.print(f"[green]✓[/green] Read {os.path.basename(file_path)}")
+                except Exception as e:
+                    console.print(f"[red]✗[/red] Failed to read {file_path}: {e}")
+        
+        # Read eval files
+        if file_paths["eval_files"]:
+            console.print("[blue]Reading eval files from context...[/blue]")
+            for file_path in file_paths["eval_files"]:
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        eval_contents[file_path] = f.read()
+                    console.print(f"[green]✓[/green] Read {os.path.basename(file_path)}")
+                except Exception as e:
+                    console.print(f"[red]✗[/red] Failed to read {file_path}: {e}")
+        
+        # Step 5: Initialize orchestrator and run analysis
         with console.status("[bold blue]Initializing Refinery..."):
-            orchestrator = await create_orchestrator(os.path.abspath(codebase))
+            if not extract_from_trace:  # Only create orchestrator if not already created
+                orchestrator = await create_orchestrator(codebase_abs)
         
         console.print(f"[blue]Analyzing trace {trace_id} from project {project}...[/blue]")
+        console.print(f"[dim]Using {len(prompt_contents)} prompt files and {len(eval_contents)} eval files[/dim]")
         
         try:
             with console.status("[bold blue]Fetching trace and analyzing failure..."):
@@ -54,7 +183,9 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
                     trace_id=trace_id,
                     project=project, 
                     expected_behavior=expected,
-                    business_context=context
+                    business_context=context,
+                    prompt_contents=prompt_contents,
+                    eval_contents=eval_contents
                 )
             
             # Display diagnosis
@@ -274,6 +405,28 @@ def fix(trace_id: str, project: str, expected: str, context: str, codebase: str,
 
 
 @main.command()
+@click.argument('trace_id')
+def token_analysis(trace_id: str):
+    """Analyze token usage for a trace."""
+    from .utils.token_counter import analyze_trace_tokens
+    
+    async def run_analysis():
+        try:
+            with console.status("[bold blue]Analyzing trace tokens..."):
+                report = await analyze_trace_tokens(trace_id)
+            
+            console.print(report)
+            
+        except Exception as e:
+            console.print(f"[red]Error analyzing tokens: {e}[/red]")
+            if config.debug:
+                import traceback
+                console.print(traceback.format_exc())
+    
+    asyncio.run(run_analysis())
+
+
+@main.command()
 def config_check():
     """Check configuration status."""
     table = Table(title="Refinery Configuration")
@@ -307,7 +460,18 @@ def config_check():
         )
         table.add_row("Anthropic Model", config.anthropic_model, "OK")
     
+    elif config.llm_provider == "gemini":
+        table.add_row(
+            "Gemini API Key",
+            "✓ Set" if config.gemini_api_key else "✗ Missing",
+            "OK" if config.gemini_api_key else "ERROR"
+        )
+        table.add_row("Gemini Model", config.gemini_model, "OK")
+    
     console.print(table)
+
+
+# Removed create-manifest command - using simple file passing instead
 
 
 @main.command()

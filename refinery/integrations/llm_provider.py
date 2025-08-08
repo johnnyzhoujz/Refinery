@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import structlog
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
+import google.generativeai as genai
 
 from ..core.interfaces import LLMProvider
 from ..utils.config import config
@@ -29,6 +30,13 @@ class ConfigurableLLMProvider(LLMProvider):
                 raise ValueError("Anthropic API key not configured")
             self.client = AsyncAnthropic(api_key=config.anthropic_api_key)
             self.model = config.anthropic_model
+            
+        elif self.provider == "gemini":
+            if not config.gemini_api_key:
+                raise ValueError("Gemini API key not configured")
+            genai.configure(api_key=config.gemini_api_key)
+            self.model = config.gemini_model or "gemini-2.0-flash"
+            self.client = genai.GenerativeModel(self.model)
             
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
@@ -70,6 +78,25 @@ class ConfigurableLLMProvider(LLMProvider):
                 
                 response = await self.client.messages.create(**kwargs)
                 return response.content[0].text
+                
+            elif self.provider == "gemini":
+                # Combine system prompt and user prompt for Gemini
+                full_prompt = ""
+                if system_prompt:
+                    full_prompt = f"System: {system_prompt}\n\nUser: {prompt}"
+                else:
+                    full_prompt = prompt
+                
+                generation_config = genai.GenerationConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens or 8192,
+                )
+                
+                response = await self.client.generate_content_async(
+                    full_prompt,
+                    generation_config=generation_config
+                )
+                return response.text
                 
         except Exception as e:
             logger.error(f"LLM completion failed", error=str(e), provider=self.provider)

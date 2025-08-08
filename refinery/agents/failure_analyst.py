@@ -31,13 +31,15 @@ class AdvancedFailureAnalyst(FailureAnalyst):
     async def analyze_trace(
         self, 
         trace: Trace,
-        expectation: DomainExpertExpectation
+        expectation: DomainExpertExpectation,
+        prompt_contents: dict = None,
+        eval_contents: dict = None
     ) -> TraceAnalysis:
         """Analyze a trace and break down what happened."""
         logger.info(f"Analyzing trace {trace.trace_id}")
         
         # Use the tool function to extract structured trace breakdown
-        trace_breakdown = await self._extract_trace_breakdown(trace, expectation)
+        trace_breakdown = await self._extract_trace_breakdown(trace, expectation, prompt_contents, eval_contents)
         
         return TraceAnalysis(
             trace_id=trace.trace_id,
@@ -51,7 +53,9 @@ class AdvancedFailureAnalyst(FailureAnalyst):
     async def compare_to_expected(
         self,
         analysis: TraceAnalysis,
-        expectation: DomainExpertExpectation
+        expectation: DomainExpertExpectation,
+        prompt_contents: dict = None,
+        eval_contents: dict = None
     ) -> GapAnalysis:
         """Compare actual behavior to expected behavior."""
         logger.info(f"Comparing trace {analysis.trace_id} to expected behavior")
@@ -69,7 +73,9 @@ class AdvancedFailureAnalyst(FailureAnalyst):
     async def diagnose_failure(
         self,
         trace_analysis: TraceAnalysis,
-        gap_analysis: GapAnalysis
+        gap_analysis: GapAnalysis,
+        prompt_contents: dict = None,
+        eval_contents: dict = None
     ) -> Diagnosis:
         """Provide a root cause diagnosis."""
         logger.info(f"Diagnosing failure for trace {trace_analysis.trace_id}")
@@ -116,16 +122,18 @@ class AdvancedFailureAnalyst(FailureAnalyst):
     async def _extract_trace_breakdown(
         self, 
         trace: Trace,
-        expectation: DomainExpertExpectation
+        expectation: DomainExpertExpectation,
+        prompt_contents: dict = None,
+        eval_contents: dict = None
     ) -> Dict[str, Any]:
         """Tool function to extract structured trace analysis."""
-        prompt = self._build_trace_analysis_prompt(trace, expectation)
+        prompt = self._build_trace_analysis_prompt(trace, expectation, prompt_contents, eval_contents)
         
         response = await self.llm.complete(
             prompt=prompt,
             system_prompt=TRACE_ANALYSIS_SYSTEM_PROMPT,
             temperature=0.1,  # Very low temperature for factual analysis
-            max_tokens=3000
+            max_tokens=4000
         )
         
         return self._parse_trace_analysis_response(response)
@@ -150,7 +158,9 @@ class AdvancedFailureAnalyst(FailureAnalyst):
     def _build_trace_analysis_prompt(
         self, 
         trace: Trace,
-        expectation: DomainExpertExpectation
+        expectation: DomainExpertExpectation,
+        prompt_contents: dict = None,
+        eval_contents: dict = None
     ) -> str:
         """Build prompt for trace analysis using Jinja2 template."""
         template = Template(TRACE_ANALYSIS_PROMPT_TEMPLATE)
@@ -160,14 +170,14 @@ class AdvancedFailureAnalyst(FailureAnalyst):
         for run in trace.runs:
             # Truncate inputs/outputs for token management
             inputs_str = json.dumps(run.inputs)
-            if len(inputs_str) > 500:
-                inputs_str = inputs_str[:500] + "... [truncated]"
+            if len(inputs_str) > 2000:
+                inputs_str = inputs_str[:2000] + "... [truncated]"
                 
             outputs_str = "None"
             if run.outputs:
                 outputs_str = json.dumps(run.outputs)
-                if len(outputs_str) > 500:
-                    outputs_str = outputs_str[:500] + "... [truncated]"
+                if len(outputs_str) > 2000:
+                    outputs_str = outputs_str[:2000] + "... [truncated]"
             
             runs_data.append({
                 "id": run.id,
@@ -186,7 +196,9 @@ class AdvancedFailureAnalyst(FailureAnalyst):
             runs=runs_data,
             expectation=expectation.description,
             business_context=expectation.business_context or "Not provided",
-            specific_issues=expectation.specific_issues
+            specific_issues=expectation.specific_issues,
+            prompt_files=prompt_contents or {},
+            eval_files=eval_contents or {}
         )
     
     def _build_gap_analysis_prompt(
@@ -345,6 +357,24 @@ ERROR: {{ run.error }}
 {% endif %}
 
 {% endfor %}
+
+{% if prompt_files %}
+Agent Prompt Files:
+{% for file_path, content in prompt_files.items() %}
+=== {{ file_path }} ===
+{{ content[:1000] }}{% if content|length > 1000 %}... [truncated]{% endif %}
+
+{% endfor %}
+{% endif %}
+
+{% if eval_files %}
+Agent Evaluation Files:
+{% for file_path, content in eval_files.items() %}
+=== {{ file_path }} ===
+{{ content[:1000] }}{% if content|length > 1000 %}... [truncated]{% endif %}
+
+{% endfor %}
+{% endif %}
 
 Using chain-of-thought reasoning, analyze this trace step by step:
 

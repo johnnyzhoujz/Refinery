@@ -273,6 +273,147 @@ class RefineryContext:
         return result
 
 
+    def store_trace_prompts(
+        self,
+        project_name: str,
+        extracted_prompts: Dict[str, Any],
+        trace_id: str
+    ) -> Dict[str, List[str]]:
+        """Store prompts extracted from a trace as files in the project directory.
+        
+        Returns paths to created files organized by type.
+        """
+        import json
+        import hashlib
+        from datetime import datetime
+        
+        # Create project directory structure
+        project_dir = self.context_dir / "projects" / project_name
+        prompts_dir = project_dir / "prompts"
+        evals_dir = project_dir / "evals"
+        configs_dir = project_dir / "configs"
+        
+        # Ensure directories exist
+        for dir_path in [prompts_dir, evals_dir, configs_dir]:
+            dir_path.mkdir(parents=True, exist_ok=True)
+        
+        created_files = {
+            "prompt_files": [],
+            "eval_files": [],
+            "config_files": []
+        }
+        
+        # Store system prompts
+        for i, prompt_data in enumerate(extracted_prompts.get("system_prompts", [])):
+            content = prompt_data["content"]
+            # Create a short hash for uniqueness
+            content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+            filename = f"system_prompt_{i}_{content_hash}.txt"
+            filepath = prompts_dir / filename
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"# System Prompt from trace {trace_id}\n")
+                f.write(f"# Run: {prompt_data.get('run_name', 'unknown')}\n")
+                f.write(f"# Timestamp: {prompt_data.get('timestamp', '')}\n\n")
+                f.write(content)
+            
+            created_files["prompt_files"].append(str(filepath.relative_to(self.codebase_path)))
+            logger.info(f"Saved system prompt to {filename}")
+        
+        # Store user prompts and templates
+        for i, prompt_data in enumerate(extracted_prompts.get("user_prompts", [])):
+            content = prompt_data["content"]
+            has_vars = prompt_data.get("has_variables", False)
+            content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+            
+            prefix = "user_template" if has_vars else "user_prompt"
+            filename = f"{prefix}_{i}_{content_hash}.txt"
+            filepath = prompts_dir / filename
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"# User {'Template' if has_vars else 'Prompt'} from trace {trace_id}\n")
+                f.write(f"# Run: {prompt_data.get('run_name', 'unknown')}\n")
+                f.write(f"# Has variables: {has_vars}\n\n")
+                f.write(content)
+            
+            created_files["prompt_files"].append(str(filepath.relative_to(self.codebase_path)))
+            logger.info(f"Saved user prompt to {filename}")
+        
+        # Store prompt templates with variables
+        for i, template_data in enumerate(extracted_prompts.get("prompt_templates", [])):
+            content = template_data["content"]
+            variables = template_data.get("variables", [])
+            content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+            
+            filename = f"template_{template_data.get('key', 'unknown')}_{content_hash}.txt"
+            filepath = prompts_dir / filename
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"# Template from trace {trace_id}\n")
+                f.write(f"# Key: {template_data.get('key', 'unknown')}\n")
+                f.write(f"# Variables: {', '.join(variables)}\n\n")
+                f.write(content)
+            
+            created_files["prompt_files"].append(str(filepath.relative_to(self.codebase_path)))
+            logger.info(f"Saved template to {filename}")
+        
+        # Store model configurations
+        if extracted_prompts.get("model_configs"):
+            config_file = configs_dir / f"model_config_{trace_id[:8]}.json"
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "trace_id": trace_id,
+                    "extracted_at": datetime.now().isoformat(),
+                    "configurations": extracted_prompts["model_configs"]
+                }, f, indent=2)
+            
+            created_files["config_files"].append(str(config_file.relative_to(self.codebase_path)))
+            logger.info(f"Saved model config to {config_file.name}")
+        
+        # Store evaluation examples
+        if extracted_prompts.get("eval_examples"):
+            eval_file = evals_dir / f"eval_examples_{trace_id[:8]}.json"
+            with open(eval_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "trace_id": trace_id,
+                    "extracted_at": datetime.now().isoformat(),
+                    "agent_metadata": extracted_prompts.get("agent_metadata", {}),
+                    "examples": extracted_prompts["eval_examples"][:10]  # Limit to 10 examples
+                }, f, indent=2)
+            
+            created_files["eval_files"].append(str(eval_file.relative_to(self.codebase_path)))
+            logger.info(f"Saved eval examples to {eval_file.name}")
+        
+        # Store metadata about this extraction
+        metadata_file = project_dir / f"trace_{trace_id[:8]}_metadata.json"
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                "trace_id": trace_id,
+                "extracted_at": datetime.now().isoformat(),
+                "agent_metadata": extracted_prompts.get("agent_metadata", {}),
+                "extraction_summary": {
+                    "system_prompts": len(extracted_prompts.get("system_prompts", [])),
+                    "user_prompts": len(extracted_prompts.get("user_prompts", [])),
+                    "templates": len(extracted_prompts.get("prompt_templates", [])),
+                    "model_configs": len(extracted_prompts.get("model_configs", [])),
+                    "eval_examples": len(extracted_prompts.get("eval_examples", []))
+                },
+                "created_files": created_files
+            }, f, indent=2)
+        
+        # Update the project context with the new files
+        self.create_or_update_context(
+            project_name,
+            prompt_files=created_files["prompt_files"],
+            eval_files=created_files["eval_files"],
+            config_files=created_files["config_files"],
+            append=True,
+            metadata={"last_trace_id": trace_id}
+        )
+        
+        return created_files
+
+
 def load_or_create_context(codebase_path: str, project_name: str) -> tuple[Dict[str, Any], bool]:
     """Load existing context or return empty context.
     

@@ -69,14 +69,14 @@ class SimpleLangSmithClient(TraceProvider):
                 
                 # Truncate large text fields
                 if isinstance(inputs, dict):
-                    inputs = {k: str(v)[:1000] + "..." if len(str(v)) > 1000 else v 
+                    inputs = {k: str(v)[:4000] + "..." if len(str(v)) > 4000 else v 
                              for k, v in inputs.items()}
                 
                 if isinstance(outputs, dict):
-                    outputs = {k: str(v)[:1000] + "..." if len(str(v)) > 1000 else v 
+                    outputs = {k: str(v)[:4000] + "..." if len(str(v)) > 4000 else v 
                               for k, v in outputs.items()}
-                elif isinstance(outputs, str) and len(outputs) > 1000:
-                    outputs = outputs[:1000] + "..."
+                elif isinstance(outputs, str) and len(outputs) > 4000:
+                    outputs = outputs[:4000] + "..."
                 
                 # Convert SDK run to internal TraceRun
                 trace_run = TraceRun(
@@ -107,7 +107,7 @@ class SimpleLangSmithClient(TraceProvider):
                     project_name = run.session_name
             
             # Limit trace size for analysis (keep most important runs)
-            if len(trace_runs) > 10:
+            if len(trace_runs) > 25:
                 logger.warning("Large trace detected, limiting to key runs", 
                              total_runs=len(trace_runs))
                 # Keep root runs, failed runs, and recent runs
@@ -124,12 +124,12 @@ class SimpleLangSmithClient(TraceProvider):
                         important_runs.append(run)
                 
                 # Fill remaining with most recent runs
-                remaining_slots = 10 - len(important_runs)
+                remaining_slots = 25 - len(important_runs)
                 for run in reversed(trace_runs[-remaining_slots:]):
                     if run not in important_runs:
                         important_runs.append(run)
                 
-                trace_runs = important_runs[:10]
+                trace_runs = important_runs[:25]
                 logger.info("Limited trace size", kept_runs=len(trace_runs))
             
             trace = Trace(
@@ -185,6 +185,168 @@ class SimpleLangSmithClient(TraceProvider):
                 for run in trace.runs
             ]
         }
+    
+    def extract_prompts_from_trace(self, trace: Trace) -> Dict[str, Any]:
+        """Extract all prompts, templates, and model configs from a trace.
+        
+        Returns a dictionary with:
+        - system_prompts: List of system prompts found
+        - user_prompts: List of user message templates
+        - prompt_templates: Any prompt templates with variables
+        - model_configs: Model configuration details
+        - eval_examples: Input/output pairs that could be test cases
+        """
+        extracted = {
+            "system_prompts": [],
+            "user_prompts": [],
+            "prompt_templates": [],
+            "model_configs": [],
+            "eval_examples": [],
+            "agent_metadata": {}
+        }
+        
+        for run in trace.runs:
+            # Extract from LLM runs (most likely to have prompts)
+            if run.run_type == RunType.LLM:
+                inputs = run.inputs or {}
+                
+                # Look for prompts in common locations
+                # Handle different prompt formats from various frameworks
+                
+                # OpenAI format
+                if "messages" in inputs:
+                    messages = inputs["messages"]
+                    if isinstance(messages, list):
+                        for msg in messages:
+                            if isinstance(msg, dict):
+                                role = msg.get("role", "")
+                                content = msg.get("content", "")
+                                
+                                if role == "system" and content:
+                                    extracted["system_prompts"].append({
+                                        "content": content,
+                                        "run_id": run.id,
+                                        "run_name": run.name,
+                                        "timestamp": run.start_time.isoformat()
+                                    })
+                                elif role == "user" and content:
+                                    extracted["user_prompts"].append({
+                                        "content": content,
+                                        "run_id": run.id,
+                                        "run_name": run.name,
+                                        "timestamp": run.start_time.isoformat(),
+                                        "has_variables": self._detect_template_variables(content)
+                                    })
+                
+                # Anthropic format
+                if "prompt" in inputs:
+                    prompt = inputs["prompt"]
+                    if isinstance(prompt, str) and prompt:
+                        extracted["user_prompts"].append({
+                            "content": prompt,
+                            "run_id": run.id,
+                            "run_name": run.name,
+                            "timestamp": run.start_time.isoformat(),
+                            "has_variables": self._detect_template_variables(prompt)
+                        })
+                
+                # Extract model configuration
+                model_config = {}
+                for key in ["model", "model_name", "temperature", "max_tokens", "top_p", "frequency_penalty"]:
+                    if key in inputs:
+                        model_config[key] = inputs[key]
+                
+                if model_config:
+                    model_config["run_id"] = run.id
+                    model_config["run_name"] = run.name
+                    extracted["model_configs"].append(model_config)
+            
+            # Extract from Chain/Agent runs (might have templates)
+            elif run.run_type in [RunType.CHAIN, RunType.TOOL]:
+                inputs = run.inputs or {}
+                outputs = run.outputs or {}
+                
+                # Look for template-like content
+                for key, value in inputs.items():
+                    if isinstance(value, str) and (
+                        "prompt" in key.lower() or 
+                        "template" in key.lower() or
+                        "instruction" in key.lower() or
+                        len(value) > 50  # Likely a prompt if it's long text
+                    ):
+                        if self._detect_template_variables(value):
+                            extracted["prompt_templates"].append({
+                                "content": value,
+                                "key": key,
+                                "run_id": run.id,
+                                "run_name": run.name,
+                                "variables": self._extract_template_variables(value)
+                            })
+                
+                # Collect input/output pairs for potential test cases
+                if inputs and outputs and not run.error:
+                    extracted["eval_examples"].append({
+                        "inputs": inputs,
+                        "outputs": outputs,
+                        "run_id": run.id,
+                        "run_name": run.name,
+                        "run_type": run.run_type.value
+                    })
+        
+        # Extract agent metadata
+        root_runs = [r for r in trace.runs if not r.parent_run_id]
+        if root_runs:
+            extracted["agent_metadata"] = {
+                "agent_name": root_runs[0].name,
+                "project_name": trace.project_name,
+                "trace_id": trace.trace_id,
+                "total_runs": len(trace.runs),
+                "failed_runs": len([r for r in trace.runs if r.error]),
+                "duration_ms": trace.duration_ms
+            }
+        
+        # Deduplicate prompts
+        extracted["system_prompts"] = self._deduplicate_prompts(extracted["system_prompts"])
+        extracted["user_prompts"] = self._deduplicate_prompts(extracted["user_prompts"])
+        
+        return extracted
+    
+    def _detect_template_variables(self, text: str) -> bool:
+        """Check if text contains template variables."""
+        import re
+        patterns = [
+            r'\{[^}]+\}',  # {variable}
+            r'\{\{[^}]+\}\}',  # {{variable}}
+            r'\$\{[^}]+\}',  # ${variable}
+        ]
+        return any(re.search(pattern, text) for pattern in patterns)
+    
+    def _extract_template_variables(self, text: str) -> List[str]:
+        """Extract variable names from template text."""
+        import re
+        variables = set()
+        
+        # Extract {variable} style
+        variables.update(re.findall(r'\{([^}]+)\}', text))
+        # Extract {{variable}} style
+        variables.update(re.findall(r'\{\{([^}]+)\}\}', text))
+        # Extract ${variable} style
+        variables.update(re.findall(r'\$\{([^}]+)\}', text))
+        
+        return list(variables)
+    
+    def _deduplicate_prompts(self, prompts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Remove duplicate prompts, keeping the first occurrence."""
+        seen = set()
+        unique = []
+        
+        for prompt in prompts:
+            content = prompt.get("content", "")
+            if content and content not in seen:
+                seen.add(content)
+                unique.append(prompt)
+        
+        return unique
 
 
 async def create_langsmith_client() -> SimpleLangSmithClient:

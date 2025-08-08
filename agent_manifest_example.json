@@ -1,0 +1,77 @@
+{
+  "name": "CustomerSupportAgent",
+  "version": "1.0.0",
+  "type": "langchain",
+  "description": "AI agent for handling customer support tickets",
+  
+  "prompts": {
+    "system": {
+      "main_system": "You are a helpful customer support agent...",
+      "escalation_system": "When escalating to human, be concise..."
+    },
+    "user": {
+      "ticket_template": "Customer query: {query}\nPrevious context: {context}",
+      "followup_template": "Follow up on ticket #{ticket_id}: {message}"
+    }
+  },
+  
+  "model_config": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "temperature": 0.7,
+    "max_tokens": 1000
+  },
+  
+  "tools": [
+    {
+      "name": "search_knowledge_base",
+      "description": "Search internal knowledge base",
+      "parameters": {
+        "query": "string",
+        "category": "string"
+      }
+    },
+    {
+      "name": "create_ticket",
+      "description": "Create a support ticket",
+      "parameters": {
+        "title": "string",
+        "priority": "string",
+        "description": "string"
+      }
+    }
+  ],
+  
+  "evaluation": {
+    "test_cases": [
+      {
+        "name": "simple_greeting",
+        "input": "Hello, I need help with my account",
+        "expected_behavior": "Should respond politely and ask for details",
+        "category": "greeting"
+      },
+      {
+        "name": "technical_issue",
+        "input": "My app keeps crashing",
+        "expected_behavior": "Should gather technical details and offer troubleshooting",
+        "category": "technical"
+      }
+    ],
+    "metrics": ["response_time", "customer_satisfaction", "resolution_rate"]
+  },
+  
+  "dependencies": [
+    "langchain>=0.1.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0"
+  ],
+  
+  "entry_point": "src/agent.py:CustomerSupportAgent",
+  
+  "metadata": {
+    "author": "Your Team",
+    "created": "2025-08-04",
+    "last_updated": "2025-08-04",
+    "tags": ["customer-support", "langchain", "gpt-4"]
+  }
+}
