@@ -58,17 +58,18 @@
 
 ### 6. **CLI Interface** (`refinery/cli.py`) ✨ **MAJOR UPDATE**
 **`analyze` command - Now with Full Context Persistence:**
-- First time: `refinery analyze <trace> --project <name> --prompt-files <files> --eval-files <files>`
+- First time: `refinery analyze <trace> --project <name> --prompt-files <files> --eval-files <files> --expected "issue"`
 - Subsequent runs: `refinery analyze <trace> --project <name> --expected "issue"` (uses saved context!)
 - **NEW**: `--extract-from-trace` flag extracts prompts directly from LangSmith trace
 - **NEW**: `--add-prompt`, `--add-eval` for incremental file additions
 - **NEW**: `--remove-prompt`, `--remove-eval` for file removal
 - **NEW**: `--update` flag to replace context instead of appending
-- Full parity with `fix` command context management
+- **NEW**: `--config-files` to include configuration files in analysis
+- **NEW**: `--apply` flag to apply the best hypothesis with Git-backed safety
+- Full context management with incremental updates; use `--apply` to apply changes
 
-**`fix` command:**
-- Already had context persistence (unchanged)
-- `refinery fix <trace> --project <name> --expected "description"`
+**Applying changes:**
+- Use `refinery analyze <trace> --project <name> --expected "description" --apply` to generate and apply the best hypothesis
 
 **`context` command:**
 - `refinery context --list` - List all projects with saved contexts
@@ -146,9 +147,10 @@ refinery analyze abc123 --project customer-service \
 refinery analyze xyz789 --project customer-service \
   --expected "Handle refunds properly"
 
-# Or generate fixes
-refinery fix xyz789 --project customer-service \
-  --expected "Process cancellations correctly"
+# Or generate and apply fixes
+refinery analyze xyz789 --project customer-service \
+  --expected "Process cancellations correctly" \
+  --apply
 ```
 
 ### Incremental Updates:
@@ -444,3 +446,111 @@ This refinement ensures Refinery analyzes the **actual agent being diagnosed** r
 **Status: Core POC complete with full context persistence. Production-ready for domain expert use.**
 
 The POC demonstrates core thesis: **domain experts can improve AI agents independently using business context, AI-powered analysis, and safe automation - now with zero repetition through intelligent context persistence.**
+
+---
+
+## Installation & Setup
+
+- **Create a virtual environment** (recommended):
+  ```bash
+  python3 -m venv .venv
+  source .venv/bin/activate
+  python -m pip install --upgrade pip
+  ```
+- **Install package and dependencies** from `pyproject.toml`:
+  ```bash
+  pip install -e .
+  ```
+- **Verify CLI is available**:
+  ```bash
+  refinery --help
+  # If the CLI isn't on PATH, use the module form:
+  python -m refinery.cli --help
+  ```
+- **Configure environment**: create a `.env` in the repo root with required keys (see next section).
+
+## Environment Variables
+
+Set the variables for the services you use. The system reads from environment and supports a `.env` file via `RefineryConfig` (`refinery/utils/config.py`).
+
+- **LangSmith (required for trace ingestion):**
+  - `LANGSMITH_API_KEY`
+  - `LANGSMITH_ENDPOINT` (optional if using non-default endpoint)
+- **LLM providers (set one or more as needed):**
+  - `OPENAI_API_KEY`
+  - `ANTHROPIC_API_KEY`
+  - `GOOGLE_API_KEY` (Gemini)
+
+Example `.env`:
+```bash
+LANGSMITH_API_KEY=sk-...
+# LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=...
+# GOOGLE_API_KEY=...
+```
+
+## Command Reference (at a glance)
+
+- **Analyze** (`refinery analyze <trace>`)
+  - Required flags: `--project <name>`, `--expected "<what should have happened>"`
+  - Notes: Keep the expected behavior concise and specific
+  - Context sources:
+    - `--prompt-files <p1,p2,...>` (comma-separated)
+    - `--eval-files <e1,e2,...>` (comma-separated)
+    - `--config-files <c1,c2,...>` (comma-separated)
+    - `--extract-from-trace` (pull prompts/configs from LangSmith trace)
+  - Incremental management:
+    - `--add-prompt <path>`, `--add-eval <path>`
+    - `--remove-prompt <path>`, `--remove-eval <path>`
+    - `--update` (replace context instead of appending)
+  - Applying changes:
+    - `--apply` (apply best hypothesis; without it, a dry run/validation is shown)
+
+- **Apply Changes**
+  - Use `refinery analyze <trace> --project <name> --expected "..." --apply` to apply targeted changes safely (Git-backed)
+
+- **Context**
+  - `refinery context --list`
+  - `refinery context --project <name>`
+  - `refinery context --clear <name>`
+
+- **Config Check**
+  - `refinery config-check`
+
+- **Token Analysis**
+  - `refinery token-analysis <trace>`
+
+## Troubleshooting
+
+- **LangSmith auth or 422 errors**
+  - Confirm `LANGSMITH_API_KEY` (and `LANGSMITH_ENDPOINT` if using a non-default region/host).
+  - Ensure the trace ID exists and you have access permissions.
+
+- **CLI command not found**
+  - Use `python -m refinery.cli ...` instead of `refinery ...`.
+
+- **Token limits on large traces**
+  - The system auto-limits to ~25 important runs and truncates long fields; prefer `--extract-from-trace` to minimize noise.
+
+- **Missing or wrong files in analysis**
+  - Use `--add-prompt/--add-eval` or `--remove-prompt/--remove-eval` to correct context.
+  - To start fresh, run `refinery context --clear <project>` and re-specify or re-extract.
+
+- **Git required for applying fixes**
+  - Ensure `git` is installed and repository is initialized before running `refinery analyze --apply ...`.
+
+## Known Limitations
+
+- **LangSmith-centric**: This POC focuses on LangSmith traces for failure analysis.
+- **Trace/file truncation**: Long inputs/outputs are truncated (e.g., ~4000 chars per trace field; ~1000 chars shown per file in analysis prompt) to respect model limits.
+- **Run limiting**: Only ~25 key runs are analyzed for very large traces; rare edge details may be omitted.
+- **Manual/explicit context**: By design, there is no auto-discovery of project files (explicit > magic). Use persistence and extract-from-trace to reduce repetition.
+
+## Changelog (high level)
+
+- 2025-08-08
+  - Extended `analyze` to use full context persistence (parity with `fix`).
+  - Added `--extract-from-trace`, incremental add/remove flags, and `--update`.
+  - Migrated to official LangSmith Python SDK; resolved 422/auth issues.
+  - Added documentation: `BUILD_SUMMARY.md`, `CONTEXT_PERSISTENCE.md`, `IMPLEMENTATION_SUMMARY.md`.

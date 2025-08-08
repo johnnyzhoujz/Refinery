@@ -50,10 +50,11 @@ def main(debug: bool, config_file: str):
 @click.option('--update', is_flag=True, help='Replace saved context instead of appending')
 # Option to extract prompts from trace
 @click.option('--extract-from-trace', is_flag=True, help='Extract and save prompts from the trace itself')
+@click.option('--apply', is_flag=True, help='Apply the best hypothesis instead of a dry run')
 def analyze(trace_id: str, project: str, expected: str, context: str, codebase: str, 
             prompt_files: tuple, eval_files: tuple, config_files: tuple,
             add_prompt: tuple, add_eval: tuple, remove_prompt: tuple, remove_eval: tuple,
-            update: bool, extract_from_trace: bool):
+            update: bool, extract_from_trace: bool, apply: bool):
     """Analyze a failed trace and provide root cause diagnosis."""
     
     async def run_analysis():
@@ -404,7 +405,7 @@ def fix(trace_id: str, project: str, expected: str, context: str, codebase: str,
     asyncio.run(run_fix())
 
 
-@main.command()
+@main.command(name='token-analysis')
 @click.argument('trace_id')
 def token_analysis(trace_id: str):
     """Analyze token usage for a trace."""
@@ -426,7 +427,7 @@ def token_analysis(trace_id: str):
     asyncio.run(run_analysis())
 
 
-@main.command()
+@main.command(name='config-check')
 def config_check():
     """Check configuration status."""
     table = Table(title="Refinery Configuration")

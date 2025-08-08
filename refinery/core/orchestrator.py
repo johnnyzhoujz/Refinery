@@ -218,4 +218,7 @@ class RefineryOrchestrator:
 
 async def create_orchestrator(codebase_path: str) -> RefineryOrchestrator:
     """Factory function to create an orchestrator."""
-    return RefineryOrchestrator(codebase_path)
+    orchestrator = RefineryOrchestrator(codebase_path)
+    # Ensure async dependencies (e.g., LangSmith client) are initialized
+    await orchestrator._init_async()
+    return orchestrator

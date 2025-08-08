@@ -98,6 +98,13 @@ class Trace:
     def get_failed_runs(self) -> List[TraceRun]:
         """Get all failed runs in this trace."""
         return [run for run in self.runs if run.is_failed]
+    
+    @property
+    def duration_ms(self) -> Optional[float]:
+        """Calculate trace duration in milliseconds."""
+        if self.start_time and self.end_time:
+            return (self.end_time - self.start_time).total_seconds() * 1000
+        return None
 
 
 @dataclass
