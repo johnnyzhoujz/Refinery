@@ -1,0 +1,10 @@
+{
+  "trace_id": "60b467c0-b9db-4ee4-934a-ad23a15bd8cd",
+  "system_prompts_count": 0,
+  "user_prompts_count": 4,
+  "templates_count": 11,
+  "model_configs_count": 0,
+  "eval_examples_count": 20,
+  "sample_system_prompt": null,
+  "sample_user_prompt": "\\n        You are an expert system designed to match transaction descriptions to customer names in a financial context. Your task is to analyze a given transaction description and return the most appropriate customer id based on the provided information and matching rules.\\n\\n\\n        Instructions:\\n        1. Review the previous matches and customer names list.\\n        2. Review the transaction description and secondary transaction description.\\n        3. Determine the best matching customer"
+}

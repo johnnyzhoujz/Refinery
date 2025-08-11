@@ -107,7 +107,7 @@ class SimpleLangSmithClient(TraceProvider):
                     project_name = run.session_name
             
             # Limit trace size for analysis (keep most important runs)
-            if len(trace_runs) > 25:
+            if len(trace_runs) > 50:
                 logger.warning("Large trace detected, limiting to key runs", 
                              total_runs=len(trace_runs))
                 # Keep root runs, failed runs, and recent runs
@@ -116,20 +116,20 @@ class SimpleLangSmithClient(TraceProvider):
                 root_runs = [r for r in trace_runs if not r.parent_run_id]
                 
                 # Add failed runs (highest priority)
-                important_runs.extend(failed_runs[:5])
+                important_runs.extend(failed_runs[:10])
                 
                 # Add root runs  
-                for run in root_runs[:3]:
+                for run in root_runs[:5]:
                     if run not in important_runs:
                         important_runs.append(run)
                 
                 # Fill remaining with most recent runs
-                remaining_slots = 25 - len(important_runs)
+                remaining_slots = 50 - len(important_runs)
                 for run in reversed(trace_runs[-remaining_slots:]):
                     if run not in important_runs:
                         important_runs.append(run)
                 
-                trace_runs = important_runs[:25]
+                trace_runs = important_runs[:50]
                 logger.info("Limited trace size", kept_runs=len(trace_runs))
             
             trace = Trace(
