@@ -232,7 +232,7 @@ ERROR: {run.error or "None"}
                     "content": combined_prompt
                 }
             ],
-            "max_output_tokens": 8000,
+            "max_output_tokens": 2000,  # Reduced to allow 88K input tokens
             "temperature": 0.1,
             "text": {
                 "format": {

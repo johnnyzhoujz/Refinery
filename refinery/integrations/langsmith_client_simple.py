@@ -67,16 +67,7 @@ class SimpleLangSmithClient(TraceProvider):
                 inputs = run.inputs or {}
                 outputs = run.outputs
                 
-                # Truncate large text fields
-                if isinstance(inputs, dict):
-                    inputs = {k: str(v)[:4000] + "..." if len(str(v)) > 4000 else v 
-                             for k, v in inputs.items()}
-                
-                if isinstance(outputs, dict):
-                    outputs = {k: str(v)[:4000] + "..." if len(str(v)) > 4000 else v 
-                              for k, v in outputs.items()}
-                elif isinstance(outputs, str) and len(outputs) > 4000:
-                    outputs = outputs[:4000] + "..."
+                # No truncation needed with vector store approach
                 
                 # Convert SDK run to internal TraceRun
                 trace_run = TraceRun(
@@ -106,31 +97,8 @@ class SimpleLangSmithClient(TraceProvider):
                 if hasattr(run, 'session_name') and run.session_name:
                     project_name = run.session_name
             
-            # Limit trace size for analysis (keep most important runs)
-            if len(trace_runs) > 50:
-                logger.warning("Large trace detected, limiting to key runs", 
-                             total_runs=len(trace_runs))
-                # Keep root runs, failed runs, and recent runs
-                important_runs = []
-                failed_runs = [r for r in trace_runs if r.error]
-                root_runs = [r for r in trace_runs if not r.parent_run_id]
-                
-                # Add failed runs (highest priority)
-                important_runs.extend(failed_runs[:10])
-                
-                # Add root runs  
-                for run in root_runs[:5]:
-                    if run not in important_runs:
-                        important_runs.append(run)
-                
-                # Fill remaining with most recent runs
-                remaining_slots = 50 - len(important_runs)
-                for run in reversed(trace_runs[-remaining_slots:]):
-                    if run not in important_runs:
-                        important_runs.append(run)
-                
-                trace_runs = important_runs[:50]
-                logger.info("Limited trace size", kept_runs=len(trace_runs))
+            # With vector store approach, we can handle full traces
+            # No run limiting needed
             
             trace = Trace(
                 trace_id=trace_id,

@@ -12,7 +12,7 @@ from .models import (
 from ..integrations.langsmith_client_simple import create_langsmith_client
 from ..integrations.llm_provider import create_llm_provider
 from ..integrations.code_manager import SafeCodeManager
-from ..agents.failure_analyst import AdvancedFailureAnalyst
+from ..agents.staged_failure_analyst import StagedFailureAnalyst
 from ..agents.hypothesis_generator import AdvancedHypothesisGenerator
 from ..analysis.simple_code_reader import build_simple_context
 from ..knowledge.gpt41_patterns import gpt41_knowledge
@@ -29,7 +29,7 @@ class RefineryOrchestrator:
         self.langsmith_client = None
         self.llm_provider = create_llm_provider()
         self.code_manager = SafeCodeManager(codebase_path)
-        self.failure_analyst = AdvancedFailureAnalyst()
+        self.failure_analyst = StagedFailureAnalyst()  # Use staged approach to avoid token limits
         self.hypothesis_generator = AdvancedHypothesisGenerator()
 # Removed AgentContextResolver - using simple file passing instead
     

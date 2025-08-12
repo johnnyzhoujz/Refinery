@@ -192,7 +192,7 @@ The complete trace data is attached as a file. Provide:
                     "file_id": trace_file_id
                 }
             ],
-            "max_output_tokens": 8000,  # Reasonable cap to stay within context
+            "max_output_tokens": 2000,  # Reduced to allow 88K input tokens within 90K org limit
             "temperature": 0.1  # Low temperature for consistent analysis
         }
         
