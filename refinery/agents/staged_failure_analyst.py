@@ -476,9 +476,15 @@ class StagedFailureAnalyst(FailureAnalyst):
         if not self._stage1_result:
             raise ValueError("Stage 1 result not available")
         
-        # Extract execution summary from timeline
+        # Extract actual coverage data from Stage 1
         timeline = self._stage1_result.get("timeline", [])
-        execution_summary = f"Analyzed {len(timeline)} runs in execution trace"
+        coverage = self._stage1_result.get("coverage", {})
+        
+        # Use actual runs analyzed from coverage, fallback to timeline length
+        runs_analyzed = coverage.get("runs_analyzed", [])
+        actual_runs_count = len(runs_analyzed) if runs_analyzed else len(timeline)
+        
+        execution_summary = f"Analyzed {actual_runs_count} runs in execution trace"
         
         # Extract issues from events
         events = self._stage1_result.get("events", [])
@@ -564,13 +570,26 @@ class StagedFailureAnalyst(FailureAnalyst):
         for cause in causes[:3]:  # Top 3 causes as evidence
             evidence.append(cause.get("hypothesis", "Unknown"))
         
+        # Preserve remediations from Stage 3
+        remediations = self._stage3_result.get("remediations", [])
+        
+        # Preserve actions and findings from Stage 4
+        next_actions = []
+        top_findings = []
+        if self._stage4_result:
+            next_actions = self._stage4_result.get("actions_next", [])
+            top_findings = self._stage4_result.get("top_findings", [])
+        
         return Diagnosis(
             failure_type=failure_type,
             root_cause=primary_cause.get("hypothesis", "Unknown root cause"),
             evidence=evidence,
             affected_components=[],
             confidence=confidence,
-            detailed_analysis=primary_cause.get("hypothesis", "Unknown root cause")
+            detailed_analysis=primary_cause.get("hypothesis", "Unknown root cause"),
+            remediations=remediations,
+            next_actions=next_actions,
+            top_findings=top_findings
         )
     
     def __del__(self):

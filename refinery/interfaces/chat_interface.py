@@ -70,6 +70,11 @@ class BaseChatInterface(ABC):
         pass
     
     @abstractmethod
+    async def show_recommendations(self, diagnosis: Diagnosis):
+        """Display actionable recommendations."""
+        pass
+    
+    @abstractmethod
     async def show_success(self, message: str):
         """Display success message."""
         pass
@@ -171,6 +176,9 @@ Let's get started!
         
         # Show diagnosis
         await self.show_diagnosis(analysis.diagnosis)
+        
+        # Show recommendations if available
+        await self.show_recommendations(analysis.diagnosis)
     
     async def show_trace_analysis(self, trace_analysis: TraceAnalysis):
         """Display trace analysis results."""
@@ -236,6 +244,59 @@ Let's get started!
             title="Gap Analysis",
             border_style="magenta"
         ))
+    
+    async def show_recommendations(self, diagnosis: Diagnosis):
+        """Display actionable recommendations."""
+        recommendations_text = ""
+        
+        # Show remediations from Stage 3
+        if diagnosis.remediations:
+            recommendations_text += "## 🛠️ Recommended Fixes\n\n"
+            for remediation in diagnosis.remediations[:5]:  # Show top 5 remediations
+                action = remediation.get("action", "Unknown action")
+                priority = remediation.get("priority", "medium").upper()
+                effort = remediation.get("effort_estimate", "unknown")
+                impact = remediation.get("expected_impact", "")
+                
+                recommendations_text += f"**Priority: {priority}** | **Effort: {effort.title()}**\n"
+                recommendations_text += f"• {action}\n"
+                if impact:
+                    recommendations_text += f"  *Expected impact: {impact}*\n"
+                recommendations_text += "\n"
+        
+        # Show next actions from Stage 4 (filter out owner/timeline as requested)
+        if diagnosis.next_actions:
+            if recommendations_text:
+                recommendations_text += "\n"
+            recommendations_text += "## 🎯 Next Actions\n\n"
+            for action_item in diagnosis.next_actions[:5]:  # Show top 5 next actions
+                action = action_item.get("action", "Unknown action")
+                priority = action_item.get("priority", "medium").upper()
+                success_criteria = action_item.get("success_criteria", "")
+                
+                recommendations_text += f"**Priority: {priority}**\n"
+                recommendations_text += f"• {action}\n"
+                if success_criteria:
+                    recommendations_text += f"  *Success criteria: {success_criteria}*\n"
+                recommendations_text += "\n"
+        
+        # Show top findings
+        if diagnosis.top_findings:
+            if recommendations_text:
+                recommendations_text += "\n"
+            recommendations_text += "## 💡 Key Findings\n\n"
+            for finding in diagnosis.top_findings[:3]:  # Show top 3 findings
+                finding_text = finding.get("finding", "Unknown finding")
+                confidence = finding.get("confidence", "medium")
+                
+                recommendations_text += f"• {finding_text} *(Confidence: {confidence})*\n"
+        
+        if recommendations_text:
+            self.console.print(Panel(
+                Markdown(recommendations_text.strip()),
+                title="Actionable Recommendations",
+                border_style="yellow"
+            ))
     
     async def show_error(self, message: str):
         """Display error message."""

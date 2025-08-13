@@ -180,7 +180,7 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
         
         try:
             with console.status("[bold blue]Fetching trace and analyzing failure..."):
-                diagnosis = await orchestrator.analyze_failure(
+                complete_analysis = await orchestrator.analyze_failure(
                     trace_id=trace_id,
                     project=project, 
                     expected_behavior=expected,
@@ -188,6 +188,9 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
                     prompt_contents=prompt_contents,
                     eval_contents=eval_contents
                 )
+            
+            # Extract diagnosis from complete analysis
+            diagnosis = complete_analysis.diagnosis
             
             # Display diagnosis
             console.print("\n" + "="*60)
@@ -211,6 +214,21 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
                 console.print("\n[bold]Evidence:[/bold]")
                 for i, evidence in enumerate(diagnosis.evidence, 1):
                     console.print(f"  {i}. {evidence}")
+            
+            # Display enhanced recommendations if available
+            if diagnosis.remediations:
+                console.print("\n[bold]Recommended Fixes:[/bold]")
+                for i, remediation in enumerate(diagnosis.remediations[:5], 1):
+                    action = remediation.get("action", "Unknown action")
+                    priority = remediation.get("priority", "medium").upper()
+                    console.print(f"  {i}. [{priority}] {action}")
+            
+            if diagnosis.next_actions:
+                console.print("\n[bold]Next Actions:[/bold]")
+                for i, action in enumerate(diagnosis.next_actions[:5], 1):
+                    action_text = action.get("action", "Unknown action")
+                    priority = action.get("priority", "medium").upper()
+                    console.print(f"  {i}. [{priority}] {action_text}")
                     
         except Exception as e:
             console.print(f"[red]Error during analysis: {e}[/red]")

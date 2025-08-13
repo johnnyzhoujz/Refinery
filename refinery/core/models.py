@@ -145,6 +145,10 @@ class Diagnosis:
     affected_components: List[str]
     confidence: Confidence
     detailed_analysis: str
+    # Enhanced fields to preserve valuable analysis data
+    remediations: List[Dict[str, Any]] = field(default_factory=list)
+    next_actions: List[Dict[str, Any]] = field(default_factory=list)
+    top_findings: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
