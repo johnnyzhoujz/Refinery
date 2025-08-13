@@ -175,36 +175,30 @@ class SimpleLangSmithClient(TraceProvider):
         
         for run in trace.runs:
             # Extract from LLM runs (most likely to have prompts)
-            if run.run_type == RunType.LLM:
+            # Fix RunType enum comparison - use string comparison to handle serialization
+            if str(run.run_type) == "RunType.LLM" or run.run_type == RunType.LLM:
                 inputs = run.inputs or {}
                 
                 # Look for prompts in common locations
                 # Handle different prompt formats from various frameworks
                 
-                # OpenAI format
+                # Handle both standard OpenAI format and LangChain serialized format
                 if "messages" in inputs:
                     messages = inputs["messages"]
-                    if isinstance(messages, list):
-                        for msg in messages:
-                            if isinstance(msg, dict):
-                                role = msg.get("role", "")
-                                content = msg.get("content", "")
-                                
-                                if role == "system" and content:
-                                    extracted["system_prompts"].append({
-                                        "content": content,
-                                        "run_id": run.id,
-                                        "run_name": run.name,
-                                        "timestamp": run.start_time.isoformat()
-                                    })
-                                elif role == "user" and content:
-                                    extracted["user_prompts"].append({
-                                        "content": content,
-                                        "run_id": run.id,
-                                        "run_name": run.name,
-                                        "timestamp": run.start_time.isoformat(),
-                                        "has_variables": self._detect_template_variables(content)
-                                    })
+                    
+                    # Handle LangChain serialized format: messages is list containing list of serialized objects
+                    if isinstance(messages, list) and len(messages) > 0:
+                        # Check if this is LangChain format (nested list with serialized objects)
+                        if isinstance(messages[0], list):
+                            # LangChain format: extract from nested list
+                            for message_list in messages:
+                                if isinstance(message_list, list):
+                                    for msg in message_list:
+                                        self._extract_from_langchain_message(msg, run, extracted)
+                        else:
+                            # Standard format: process directly
+                            for msg in messages:
+                                self._extract_from_standard_message(msg, run, extracted)
                 
                 # Anthropic format
                 if "prompt" in inputs:
@@ -315,6 +309,72 @@ class SimpleLangSmithClient(TraceProvider):
                 unique.append(prompt)
         
         return unique
+    
+    def _extract_from_langchain_message(self, msg: dict, run: TraceRun, extracted: dict):
+        """Extract prompts from LangChain serialized message format."""
+        if not isinstance(msg, dict) or msg.get("type") != "constructor":
+            return
+        
+        # Check if this is a LangChain message
+        id_parts = msg.get("id", [])
+        if not (isinstance(id_parts, list) and len(id_parts) >= 4 and 
+                id_parts[:3] == ["langchain", "schema", "messages"]):
+            return
+        
+        message_type = id_parts[3]  # SystemMessage, AIMessage, HumanMessage
+        kwargs = msg.get("kwargs", {})
+        content = kwargs.get("content", "")
+        
+        if not content:
+            return
+        
+        # Map LangChain message types to roles
+        if message_type == "SystemMessage":
+            extracted["system_prompts"].append({
+                "content": content,
+                "run_id": run.id,
+                "run_name": run.name,
+                "timestamp": run.start_time.isoformat(),
+                "source": "langchain"
+            })
+        elif message_type == "HumanMessage":
+            extracted["user_prompts"].append({
+                "content": content,
+                "run_id": run.id,
+                "run_name": run.name,
+                "timestamp": run.start_time.isoformat(),
+                "has_variables": self._detect_template_variables(content),
+                "source": "langchain"
+            })
+    
+    def _extract_from_standard_message(self, msg: dict, run: TraceRun, extracted: dict):
+        """Extract prompts from standard OpenAI message format."""
+        if not isinstance(msg, dict):
+            return
+        
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        
+        if not content:
+            return
+        
+        if role == "system":
+            extracted["system_prompts"].append({
+                "content": content,
+                "run_id": run.id,
+                "run_name": run.name,
+                "timestamp": run.start_time.isoformat(),
+                "source": "standard"
+            })
+        elif role == "user":
+            extracted["user_prompts"].append({
+                "content": content,
+                "run_id": run.id,
+                "run_name": run.name,
+                "timestamp": run.start_time.isoformat(),
+                "has_variables": self._detect_template_variables(content),
+                "source": "standard"
+            })
 
 
 async def create_langsmith_client() -> SimpleLangSmithClient:

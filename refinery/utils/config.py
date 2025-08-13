@@ -10,6 +10,49 @@ load_dotenv()
 
 
 @dataclass
+class ChunkedAnalysisConfig:
+    """Configuration for chunked analysis to handle large traces."""
+    
+    # Core chunking parameters
+    group_size_runs: int = 6  # Number of runs per group for chunked analysis
+    chunking_threshold: int = 20  # Use chunking for traces with >20 runs
+    
+    # Token management
+    max_num_results_stage1: int = 2  # File search results for Stage 1 chunks
+    max_num_results_other: int = 3  # File search results for Stages 2-3
+    max_output_tokens_stage1: int = 900  # Output tokens for Stage 1 chunks
+    max_output_tokens_other: int = 1000  # Output tokens for Stages 2-3
+    
+    # Rate limiting
+    inter_group_sleep_s: int = 10  # Seconds between group calls
+    tpm_limit: int = 30000  # TPM limit for rate limiting
+    tpm_buffer: int = 2000  # Buffer below TPM limit
+    
+    # Model settings
+    temperature: float = 0.2  # Low temperature for consistency
+    
+    # Feature flags
+    disable_chunking: bool = False  # Emergency disable flag
+    
+    @classmethod
+    def from_env(cls) -> "ChunkedAnalysisConfig":
+        """Load chunked analysis configuration from environment variables."""
+        return cls(
+            group_size_runs=int(os.getenv("GROUP_SIZE_RUNS", "6")),
+            chunking_threshold=int(os.getenv("CHUNKING_THRESHOLD", "20")),
+            max_num_results_stage1=int(os.getenv("MAX_NUM_RESULTS_STAGE1", "2")),
+            max_num_results_other=int(os.getenv("MAX_NUM_RESULTS_OTHER", "3")),
+            max_output_tokens_stage1=int(os.getenv("MAX_OUTPUT_TOKENS_STAGE1", "900")),
+            max_output_tokens_other=int(os.getenv("MAX_OUTPUT_TOKENS_OTHER", "1000")),
+            inter_group_sleep_s=int(os.getenv("INTER_GROUP_SLEEP_S", "10")),
+            tpm_limit=int(os.getenv("TPM_LIMIT", "30000")),
+            tpm_buffer=int(os.getenv("TPM_BUFFER", "2000")),
+            temperature=float(os.getenv("TEMPERATURE", "0.2")),
+            disable_chunking=os.getenv("REFINERY_DISABLE_CHUNKING", "false").lower() == "true"
+        )
+
+
+@dataclass
 class RefineryConfig:
     """Configuration settings for Refinery."""
     
@@ -47,6 +90,9 @@ class RefineryConfig:
     max_changes_per_hypothesis: int = 10
     require_approval_for_changes: bool = True
     
+    # Chunked analysis configuration
+    chunked_analysis: ChunkedAnalysisConfig = None
+    
     @classmethod
     def from_env(cls) -> "RefineryConfig":
         """Load configuration from environment variables."""
@@ -68,7 +114,8 @@ class RefineryConfig:
             cache_ttl=int(os.getenv("CACHE_TTL", "900")),
             max_file_size_kb=int(os.getenv("MAX_FILE_SIZE_KB", "1000")),
             max_changes_per_hypothesis=int(os.getenv("MAX_CHANGES_PER_HYPOTHESIS", "10")),
-            require_approval_for_changes=os.getenv("REQUIRE_APPROVAL_FOR_CHANGES", "true").lower() == "true"
+            require_approval_for_changes=os.getenv("REQUIRE_APPROVAL_FOR_CHANGES", "true").lower() == "true",
+            chunked_analysis=ChunkedAnalysisConfig.from_env()
         )
     
     def validate(self) -> None:

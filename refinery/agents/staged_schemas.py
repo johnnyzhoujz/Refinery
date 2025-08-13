@@ -7,6 +7,7 @@ Each stage produces structured JSON that feeds into the next stage.
 # Stage 1: Trace Analysis Schema
 TRACE_ANALYSIS_SCHEMA = {
     "type": "object",
+    "title": "TraceAnalysisResult",
     "additionalProperties": False,
     "properties": {
         "timeline": {
@@ -74,6 +75,7 @@ TRACE_ANALYSIS_SCHEMA = {
 # Stage 2: Gap Analysis Schema  
 GAP_ANALYSIS_SCHEMA = {
     "type": "object",
+    "title": "GapAnalysisResult", 
     "additionalProperties": False,
     "properties": {
         "gaps": {
@@ -121,7 +123,8 @@ GAP_ANALYSIS_SCHEMA = {
 
 # Stage 3: Diagnosis Schema
 DIAGNOSIS_SCHEMA = {
-    "type": "object", 
+    "type": "object",
+    "title": "DiagnosisResult", 
     "additionalProperties": False,
     "properties": {
         "causes": {
@@ -187,6 +190,7 @@ DIAGNOSIS_SCHEMA = {
 # Stage 4: Synthesis Schema
 SYNTHESIS_SCHEMA = {
     "type": "object",
+    "title": "SynthesisResult",
     "additionalProperties": False, 
     "properties": {
         "summary": {

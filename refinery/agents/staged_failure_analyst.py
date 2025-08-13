@@ -11,6 +11,7 @@ This implements the 4-stage analysis approach:
 import json
 import asyncio
 import logging
+import time
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -73,17 +74,40 @@ class StagedFailureAnalyst(FailureAnalyst):
         prompt_contents: dict = None,
         eval_contents: dict = None
     ) -> TraceAnalysis:
-        """Run Stage 1: Trace Analysis using Interactive Responses API."""
+        """Run Stage 1: Trace Analysis using chunked approach for large traces."""
         
         logger.info(f"Starting staged trace analysis for trace {trace.trace_id}")
         
-        # Create vector store with all files
-        self._vector_store_id = await self.vector_store_manager.create_analysis_vector_store(
-            trace, expectation, prompt_contents or {}, eval_contents or {}
-        )
+        # Determine if we need chunking based on trace size
+        total_runs = len(trace.runs)
+        chunked_config = config.chunked_analysis
+        use_chunking = (total_runs > chunked_config.chunking_threshold and 
+                       not chunked_config.disable_chunking)
         
-        # Run Stage 1 interactively
-        self._stage1_result = await self._run_stage1_interactive()
+        if use_chunking:
+            num_groups = (total_runs + chunked_config.group_size_runs - 1) // chunked_config.group_size_runs
+            logger.info(f"Large trace detected ({total_runs} runs > {chunked_config.chunking_threshold}), "
+                       f"using chunked analysis with {num_groups} groups")
+            
+            # Create vector store with chunked files for large traces
+            self._vector_store_id = await self.vector_store_manager.create_single_store_with_all_files(
+                trace, expectation, prompt_contents or {}, eval_contents or {}, 
+                group_size=chunked_config.group_size_runs
+            )
+            
+            # Run chunked Stage 1
+            self._stage1_result = await self._run_stage1_chunked(num_groups)
+        else:
+            logger.info(f"Small trace ({total_runs} runs <= {chunked_config.chunking_threshold}), "
+                       f"using standard analysis")
+            
+            # Original single-call approach for small traces
+            self._vector_store_id = await self.vector_store_manager.create_analysis_vector_store(
+                trace, expectation, prompt_contents or {}, eval_contents or {}
+            )
+            
+            # Run Stage 1 interactively
+            self._stage1_result = await self._run_stage1_interactive()
         
         # Convert to TraceAnalysis format for backward compatibility
         return self._convert_stage1_to_trace_analysis(trace.trace_id)
@@ -160,8 +184,200 @@ class StagedFailureAnalyst(FailureAnalyst):
         logger.info("Completed Stage 1: Trace Analysis")
         return result
     
+    async def _run_stage1_chunked(self, num_groups: int) -> Dict[str, Any]:
+        """
+        Run Stage 1 in groups to avoid TPM limits.
+        
+        Args:
+            num_groups: Number of groups to process
+            
+        Returns:
+            Merged Stage 1 results from all groups
+        """
+        logger.info(f"Running Stage 1: Chunked Analysis with {num_groups} groups")
+        
+        partials = []  # consistent variable naming
+        tokens_window = []  # list of (timestamp, total_tokens) for simple TPM tracking
+        chunked_config = config.chunked_analysis
+        
+        for group_idx in range(num_groups):
+            group_id = f"g{group_idx + 1:02d}"
+            
+            # User message with scope line
+            user_message = f"""Scope: ONLY consider files whose *filename begins with* "{group_id}_". Ignore any file not matching this prefix.
+
+{STAGE1_TRACE_ANALYSIS_PROMPT}"""
+            
+            # TPM budgeting - before call
+            now_ts = time.time()
+            tokens_window = [(ts, t) for ts, t in tokens_window if now_ts - ts < 60]
+            tokens_in_60 = sum(t for _, t in tokens_window)
+            est_next = 12000 if chunked_config.max_num_results_stage1 == 2 else 15000
+            
+            tpm_threshold = chunked_config.tpm_limit - chunked_config.tpm_buffer
+            if tokens_in_60 + est_next > tpm_threshold:
+                wait = 60 - (now_ts - min(ts for ts, _ in tokens_window))
+                logger.info(f"TPM limit approaching, waiting {wait:.1f}s before group {group_idx + 1}")
+                await asyncio.sleep(max(0, wait))
+            
+            # Build request body - spec-compliant format
+            body = {
+                "model": self.model,
+                "tools": [
+                    {
+                        "type": "file_search",
+                        "vector_store_ids": [self._vector_store_id],
+                        "max_num_results": chunked_config.max_num_results_stage1  # e.g., 2
+                    }
+                ],
+                "input": [
+                    { "type": "message",
+                      "role": "system",
+                      "content": [ { "type": "input_text", "text": FAILURE_ANALYST_SYSTEM_PROMPT_V3 } ] },
+                    { "type": "message", 
+                      "role": "user",
+                      "content": [ { "type": "input_text", "text": user_message } ] }
+                ],
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "stage1_output", 
+                        "strict": True,
+                        "schema": TRACE_ANALYSIS_SCHEMA     # root {"type":"object", ...}
+                    }
+                },
+                "temperature": chunked_config.temperature,
+                "max_output_tokens": chunked_config.max_output_tokens_stage1
+            }
+            
+            # Make API call with retry logic
+            try:
+                for retry_attempt in range(2):  # 2 retries per group
+                    try:
+                        resp = await responses_client.create(body)
+                        data, usage_total = responses_client.parse_json_and_usage(resp)
+                        partials.append(data)
+                        
+                        # TPM budgeting - after call
+                        ts_after = time.time()
+                        actual = usage_total or est_next
+                        tokens_window = [(ts, t) for ts, t in tokens_window if ts_after - ts < 60]
+                        tokens_window.append((ts_after, actual))
+                        
+                        logger.info(f"Completed Stage 1 Group {group_idx + 1}/{num_groups}: "
+                                  f"Found {len(data.get('timeline', []))} timeline items, "
+                                  f"used {actual} tokens")
+                        break  # Success, exit retry loop
+                        
+                    except Exception as e:
+                        if retry_attempt == 0 and "rate" in str(e).lower():
+                            logger.warning(f"Rate limit on group {group_idx + 1}, retrying in 30s")
+                            await asyncio.sleep(30)
+                        else:
+                            raise
+                            
+            except Exception as e:
+                logger.error(f"Failed Stage 1 Group {group_idx + 1}: {str(e)}")
+                # POC level: continue with minimal placeholder
+                partials.append({"timeline": [], "events": [], "evidence": []})
+            
+            # Sleep between groups to smooth TPM usage (except after last group)
+            if group_idx < num_groups - 1:
+                sleep_time = chunked_config.inter_group_sleep_s
+                logger.info(f"Chunked analysis progress: {group_idx + 1}/{num_groups} groups completed, "
+                          f"sleeping {sleep_time}s before next group...")
+                await asyncio.sleep(sleep_time)
+        
+        # Merge partial results
+        logger.info("Merging Stage 1 partial results...")
+        merged_result = self._merge_stage1_results(partials)
+        
+        logger.info(f"Completed Stage 1 Chunked Analysis: "
+                   f"Merged {len(merged_result.get('timeline', []))} total timeline items")
+        return merged_result
+    
+    def _merge_stage1_results(self, partials: list[dict]) -> dict:
+        """
+        Merge partial Stage 1 results from chunked analysis.
+        
+        Args:
+            partials: List of partial Stage 1 results from each group
+            
+        Returns:
+            Merged Stage 1 result dictionary
+        """
+        logger.debug(f"Merging {len(partials)} partial Stage 1 results")
+        
+        merged = {"timeline": [], "events": [], "evidence": []}
+        
+        for group_idx, result in enumerate(partials):
+            timeline = result.get("timeline", [])
+            events = result.get("events", [])
+            evidence = result.get("evidence", [])
+            
+            # Add merge metadata for sorting
+            for idx, item in enumerate(timeline):
+                item.setdefault("_merge_group_index", group_idx)
+                item.setdefault("_merge_order", idx)
+            
+            for idx, item in enumerate(events):
+                item.setdefault("_merge_group_index", group_idx)
+                item.setdefault("_merge_order", idx)
+                
+            for idx, item in enumerate(evidence):
+                if isinstance(item, dict):
+                    item.setdefault("_merge_group_index", group_idx)
+                    item.setdefault("_merge_order", idx)
+            
+            # Extend merged lists
+            merged["timeline"].extend(timeline)
+            merged["events"].extend(events)
+            merged["evidence"].extend(evidence)
+            
+            logger.debug(f"Group {group_idx + 1}: Added {len(timeline)} timeline, "
+                       f"{len(events)} events, {len(evidence)} evidence items")
+        
+        # Sort timeline by timestamp, then by (group_index, order) for deterministic ordering
+        def sort_key(item):
+            timestamp = item.get("timestamp")
+            if timestamp:
+                return timestamp
+            else:
+                # Fallback to group and order for items without timestamps
+                return (item.get("_merge_group_index", 0), item.get("_merge_order", 0))
+        
+        merged["timeline"].sort(key=sort_key)
+        
+        # Sort events by severity/impact, then by group order
+        def event_sort_key(item):
+            impact_priority = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+            impact = item.get("impact", "low")
+            priority = impact_priority.get(impact, 3)
+            return (priority, item.get("_merge_group_index", 0), item.get("_merge_order", 0))
+        
+        merged["events"].sort(key=event_sort_key)
+        
+        # Remove merge metadata from final result (optional - keeps result clean)
+        for item in merged["timeline"]:
+            item.pop("_merge_group_index", None)
+            item.pop("_merge_order", None)
+        
+        for item in merged["events"]:
+            item.pop("_merge_group_index", None)
+            item.pop("_merge_order", None)
+            
+        for item in merged["evidence"]:
+            if isinstance(item, dict):
+                item.pop("_merge_group_index", None)
+                item.pop("_merge_order", None)
+        
+        logger.info(f"Merge complete: {len(merged['timeline'])} timeline items, "
+                   f"{len(merged['events'])} events, {len(merged['evidence'])} evidence items")
+        
+        return merged
+    
     async def _run_stage2_interactive(self) -> Dict[str, Any]:
-        """Run Stage 2: Gap Analysis interactively using Responses API."""
+        """Run Stage 2: Gap Analysis with reduced retrieval for chunked compatibility."""
         
         logger.info("Running Stage 2: Gap Analysis (Interactive)")
         
@@ -170,16 +386,19 @@ class StagedFailureAnalyst(FailureAnalyst):
             stage1_json=json.dumps(self._stage1_result, indent=2)
         )
         
-        # Build request body with V3 system prompt
+        # Use chunked analysis configuration for consistent limits
+        chunked_config = config.chunked_analysis
+        
+        # Build request body with V3 system prompt and reduced limits
         body = build_responses_body(
             model=self.model,
             vector_store_id=self._vector_store_id,
             system_text=FAILURE_ANALYST_SYSTEM_PROMPT_V3,
             user_text=user_prompt,
             json_schema_obj=GAP_ANALYSIS_SCHEMA,
-            max_num_results=8,
-            max_output_tokens=2000,
-            temperature=0.2
+            max_num_results=chunked_config.max_num_results_other,  # 3 instead of 8
+            max_output_tokens=chunked_config.max_output_tokens_other,  # 1000 instead of 2000
+            temperature=chunked_config.temperature  # 0.2
         )
         
         # Send request and parse response
@@ -189,7 +408,7 @@ class StagedFailureAnalyst(FailureAnalyst):
         return result
     
     async def _run_stage3_interactive(self) -> Dict[str, Any]:
-        """Run Stage 3: Diagnosis interactively using Responses API."""
+        """Run Stage 3: Diagnosis with reduced retrieval for chunked compatibility."""
         
         logger.info("Running Stage 3: Diagnosis (Interactive)")
         
@@ -199,16 +418,19 @@ class StagedFailureAnalyst(FailureAnalyst):
             stage2_json=json.dumps(self._stage2_result, indent=2)
         )
         
-        # Build request body with V3 system prompt
+        # Use chunked analysis configuration for consistent limits
+        chunked_config = config.chunked_analysis
+        
+        # Build request body with V3 system prompt and reduced limits
         body = build_responses_body(
             model=self.model,
             vector_store_id=self._vector_store_id,
             system_text=FAILURE_ANALYST_SYSTEM_PROMPT_V3,
             user_text=user_prompt,
             json_schema_obj=DIAGNOSIS_SCHEMA,
-            max_num_results=8,
-            max_output_tokens=2500,
-            temperature=0.2
+            max_num_results=chunked_config.max_num_results_other,  # 3 instead of 8
+            max_output_tokens=chunked_config.max_output_tokens_other + 200,  # 1200 instead of 2500
+            temperature=chunked_config.temperature  # 0.2
         )
         
         # Send request and parse response

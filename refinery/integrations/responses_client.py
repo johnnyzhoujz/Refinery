@@ -8,7 +8,7 @@ and parses the structured JSON output.
 import json
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -161,6 +161,47 @@ class ResponsesClient:
             
             raise Exception(f"Failed to parse JSON output: {str(e)}")
     
+    def parse_json_and_usage(self, response: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[int]]:
+        """
+        Extract and parse JSON from the Responses API response along with usage information.
+        
+        Args:
+            response: Raw response from the API
+        
+        Returns:
+            Tuple of (parsed JSON object, total_tokens or None)
+        
+        Raises:
+            Exception: If JSON parsing fails
+        """
+        # Parse the JSON output first
+        json_output = self.parse_json_output(response)
+        
+        # Extract usage information
+        usage_total = None
+        try:
+            # Check for usage in top-level response (standard format)
+            if "usage" in response and "total_tokens" in response["usage"]:
+                usage_total = response["usage"]["total_tokens"]
+            
+            # Fallback: Check for usage in choices format
+            elif "choices" in response and len(response["choices"]) > 0:
+                choice = response["choices"][0]
+                if "usage" in choice and "total_tokens" in choice["usage"]:
+                    usage_total = choice["usage"]["total_tokens"]
+            
+            # Log if we found usage info
+            if usage_total is not None:
+                logger.debug(f"Extracted usage: {usage_total} total tokens")
+            else:
+                logger.debug("No usage information found in response")
+                
+        except Exception as e:
+            logger.warning(f"Failed to extract usage information: {str(e)}")
+            usage_total = None
+        
+        return json_output, usage_total
+    
     async def create_with_retry(
         self, 
         body: Dict[str, Any],
@@ -218,6 +259,12 @@ def parse_json_output(response: Dict[str, Any]) -> Dict[str, Any]:
     if _client is None:
         raise Exception("Client not initialized. Call init_client() first.")
     return _client.parse_json_output(response)
+
+def parse_json_and_usage(response: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[int]]:
+    """Parse JSON and usage information using the module-level client."""
+    if _client is None:
+        raise Exception("Client not initialized. Call init_client() first.")
+    return _client.parse_json_and_usage(response)
 
 async def create_with_retry(body: Dict[str, Any]) -> Dict[str, Any]:
     """Create with retry using the module-level client."""
