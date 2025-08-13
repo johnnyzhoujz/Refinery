@@ -573,5 +573,22 @@ def list_failures(project: str, limit: int):
     console.print("[yellow]This command will be implemented by the LangSmith subagent.[/yellow]")
 
 
+@main.command()
+@click.option('--project', default='default', help='Project name (default: default)')
+@click.option('--codebase', default='.', help='Path to codebase (default: current directory)')
+def chat(project: str, codebase: str):
+    """Interactive chat mode for analyzing AI agent failures."""
+    
+    async def run_chat():
+        # Import here to avoid circular imports
+        from .interfaces.chat_interface import ChatInterface
+        from .interfaces.chat_session import run_chat_session
+        
+        interface = ChatInterface()
+        await run_chat_session(interface, codebase, project)
+    
+    asyncio.run(run_chat())
+
+
 if __name__ == "__main__":
     main()

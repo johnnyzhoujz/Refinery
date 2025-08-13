@@ -7,7 +7,7 @@ import structlog
 
 from .models import (
     Trace, DomainExpertExpectation, CodeContext, 
-    Diagnosis, Hypothesis, FileChange
+    Diagnosis, Hypothesis, FileChange, CompleteAnalysis
 )
 from ..integrations.langsmith_client_simple import create_langsmith_client
 from ..integrations.llm_provider import create_llm_provider
@@ -46,7 +46,7 @@ class RefineryOrchestrator:
         business_context: Optional[str] = None,
         prompt_contents: Optional[dict] = None,
         eval_contents: Optional[dict] = None
-    ) -> Diagnosis:
+    ) -> CompleteAnalysis:
         """Analyze a failed trace and provide diagnosis."""
         logger.info("Starting failure analysis", trace_id=trace_id, project=project)
         
@@ -88,7 +88,12 @@ class RefineryOrchestrator:
         )
         logger.info("Completed diagnosis", failure_type=diagnosis.failure_type.value)
         
-        return diagnosis
+        # Return complete analysis with all intermediate results
+        return CompleteAnalysis(
+            trace_analysis=trace_analysis,
+            gap_analysis=gap_analysis,
+            diagnosis=diagnosis
+        )
     
     async def generate_fixes(
         self,

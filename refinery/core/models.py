@@ -148,6 +148,19 @@ class Diagnosis:
 
 
 @dataclass
+class CompleteAnalysis:
+    """Complete analysis results including all intermediate steps."""
+    trace_analysis: TraceAnalysis
+    gap_analysis: GapAnalysis
+    diagnosis: Diagnosis
+    
+    def get_summary(self) -> str:
+        """Get a brief summary of the complete analysis."""
+        return (f"{self.diagnosis.failure_type.value.replace('_', ' ').title()}: "
+                f"{self.diagnosis.root_cause}")
+
+
+@dataclass
 class FileChange:
     """Represents a change to a file."""
     file_path: str
