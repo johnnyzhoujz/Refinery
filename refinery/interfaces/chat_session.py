@@ -114,13 +114,45 @@ async def run_chat_session(
         # Step 5: Show comprehensive results
         await interface.show_complete_analysis(complete_analysis)
         
-        # Step 6: Analysis complete message (hypothesis generation not implemented in chat mode yet)
-        await interface.show_success(
-            "Analysis complete! Use 'refinery analyze --apply' with this trace ID if you want to generate and apply fixes."
-        )
-        
-        # Note: Hypothesis generation and fix application are available via the regular CLI:
-        # refinery analyze <trace_id> --project <name> --expected "<description>" --apply
+        # Step 6: Offer hypothesis generation
+        if await interface.ask_yes_no("Generate improved prompts using GPT-5?"):
+            await interface.show_progress("🤖 Generating improved prompts...")
+            
+            try:
+                # Get the trace for prompt extraction
+                trace = await orchestrator.langsmith_client.get_trace(trace_id)
+                
+                # Generate hypothesis with rewritten prompts
+                hypotheses = await orchestrator.generate_hypotheses_from_trace(
+                    diagnosis=complete_analysis.diagnosis,
+                    trace=trace,
+                    max_hypotheses=1  # One good hypothesis for now
+                )
+                
+                if hypotheses:
+                    hypothesis = hypotheses[0]
+                    
+                    # Show before/after comparison
+                    await interface.show_hypothesis_comparison(hypothesis)
+                    
+                    # Save to customer experiment system
+                    from ..experiments.customer_experiment_manager import CustomerExperimentManager
+                    experiment_manager = CustomerExperimentManager(codebase_abs)
+                    version_id = experiment_manager.save_version(hypothesis)
+                    
+                    await interface.show_success(
+                        f"💾 Saved as experiment version: {version_id}\n"
+                        f"   Test with: refinery test {version_id}"
+                    )
+                else:
+                    await interface.show_error("Failed to generate hypothesis. Please try again.")
+                    
+            except Exception as e:
+                await interface.show_error(f"Error generating hypothesis: {e}")
+        else:
+            await interface.show_success(
+                "Analysis complete! Use 'refinery analyze --apply' with this trace ID if you want to generate and apply fixes later."
+            )
     
     except Exception as e:
         await interface.show_error(f"An error occurred: {e}")

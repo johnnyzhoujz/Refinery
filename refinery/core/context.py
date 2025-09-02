@@ -271,6 +271,40 @@ class RefineryContext:
                     result[file_type].append(str(abs_path))
         
         return result
+    
+    def load_context_for_project(self, project_name: str) -> tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+        """Load file contents for a project context."""
+        file_paths = self.get_file_paths(project_name)
+        
+        prompt_contents = {}
+        eval_contents = {}
+        config_contents = {}
+        
+        # Read prompt files
+        for file_path in file_paths["prompt_files"]:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    prompt_contents[file_path] = f.read()
+            except Exception as e:
+                logger.warning(f"Failed to read prompt file {file_path}: {e}")
+        
+        # Read eval files
+        for file_path in file_paths["eval_files"]:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    eval_contents[file_path] = f.read()
+            except Exception as e:
+                logger.warning(f"Failed to read eval file {file_path}: {e}")
+        
+        # Read config files
+        for file_path in file_paths["config_files"]:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    config_contents[file_path] = f.read()
+            except Exception as e:
+                logger.warning(f"Failed to read config file {file_path}: {e}")
+        
+        return prompt_contents, eval_contents, config_contents
 
 
     def store_trace_prompts(

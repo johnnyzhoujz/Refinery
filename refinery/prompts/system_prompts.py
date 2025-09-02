@@ -900,7 +900,9 @@ Focus on evidence-based analysis grounded in the trace data. Quote specific run 
 """
 
 # Version 3: V2 + Interactive Responses API with Vector Store File Search
-FAILURE_ANALYST_SYSTEM_PROMPT_V3 = """Analyze LangSmith traces using vector store file search to identify why AI agents failed. Focus on systematic trace comprehension, token awareness, and evidence-based diagnosis.
+FAILURE_ANALYST_SYSTEM_PROMPT_V3 = """Analyze LangSmith traces using vector store file search to identify why AI agents failed. Focus on systematic trace comprehension, prompt quality analysis, eval coverage assessment, and evidence-based diagnosis.
+
+IMPORTANT: Most failures are NOT due to token limits. Modern models handle large contexts well. Focus on prompt quality, eval coverage, and business logic alignment. Only consider token issues when there's clear evidence (truncation markers, explicit errors, etc.).
 
 ## File Search Protocol (Interactive Responses API)
 
@@ -910,18 +912,32 @@ Use the file_search tool with bounded discipline:
 - Track coverage in your output: files_scanned[], runs_analyzed[], remaining[]
 - Cite evidence as {file: "name", section: "lines/description"}
 
-## Critical: Token Health Check (Always First)
+## Step 1: Prompt Quality Assessment (Primary Focus)
 
-Before any analysis, assess token usage:
-1. **Token Budget Status**: Total used/available, distribution (prompt vs completion)
-2. **Truncation Detection**: >90% usage indicates risk, identify exact cutoff
-3. **Token Failure Patterns**:
-   - HARD_TRUNCATION: Output cut mid-sentence at token limit
-   - SOFT_TRUNCATION: Rushed conclusion as limit approached  
-   - CONTEXT_STARVATION: All tokens consumed by prompt, no response space
-   - ATTENTION_DILUTION: Too much context, model can't focus
+Examine the prompts and instructions:
+1. **Clarity Analysis**: Are instructions clear and unambiguous?
+2. **Completeness Check**: Are critical details or constraints missing?
+3. **Contradiction Detection**: Do different parts of the prompt conflict?
+4. **Example Alignment**: Do few-shot examples match the intended behavior?
+5. **Format Specification**: Are output format requirements clear and consistent?
 
-## Step 1: Trace Comprehension (What was supposed to happen?)
+## Step 2: Evaluation Coverage Assessment
+
+Analyze test coverage and evaluation quality:
+1. **Scenario Coverage**: Do evals test the actual use cases that failed?
+2. **Edge Case Testing**: Are boundary conditions and error cases covered?
+3. **Success Criteria**: Are the evaluation criteria aligned with business needs?
+4. **False Positive/Negative Rates**: Do tests pass when they should fail or vice versa?
+
+## Step 3: Business Logic Alignment
+
+Check if the agent behavior matches business requirements:
+1. **Expectation Mapping**: Does agent behavior match user expectations?
+2. **Domain Rules**: Are business constraints properly encoded?
+3. **Context Understanding**: Does the agent understand the domain context?
+4. **Error Handling**: Are failure modes handled appropriately?
+
+## Step 4: Trace Comprehension (What was supposed to happen?)
 
 Extract from trace via file search:
 1. Agent's intended task (from initial user input)
@@ -930,26 +946,50 @@ Extract from trace via file search:
 4. Model configuration (GPT-4, temperature, etc.)
 5. Available context (prompts, templates, retrieved data)
 
-## Step 2: Failure Identification (Where did it diverge?)
+## Step 5: Failure Identification (Where did it diverge?)
 
 Compare expected vs actual:
 - Each run's input/output in sequence
 - Exact divergence point (which run failed?)
 - Failure consistency (always fails or intermittent?)
-- Token usage at failure point
 - Error messages or API failures
+- Behavioral pattern changes
 
-## Step 3: Adaptive Pattern Recognition
+## Step 6: Adaptive Pattern Recognition
 
-Check common patterns first, but don't force-fit:
-- **CONTEXT_OVERFLOW**: Performance degrades with input size
-- **INSTRUCTION_GAP**: Agent does something never specified
-- **FORMAT_VIOLATION**: Output structure doesn't match requirements  
+Check common patterns first, prioritizing non-token issues:
+
+**Primary Patterns (Most Common):**
+- **INSTRUCTION_GAP**: Agent does something never specified in prompts
+- **PROMPT_CONTRADICTION**: Conflicting instructions within prompts
+- **EXAMPLE_MISLEADING**: Few-shot examples teach wrong behavior
+- **EVAL_MISMATCH**: Evaluation criteria doesn't match actual needs
+- **PROMPT_UNDERSPECIFIED**: Critical details missing from instructions
+- **BUSINESS_LOGIC_ERROR**: Misaligned business requirements
+- **FORMAT_VIOLATION**: Output structure doesn't match requirements
+
+**Secondary Patterns:**
 - **STATE_CONFUSION**: Lost track of conversation context
 - **TOOL_FAILURE**: API calls or retrievals failed
 - **CASCADE_FAILURE**: One failure triggers chain reaction
+- **TEMPLATE_ERROR**: Issues with variable substitution or formatting
 
-For novel patterns, create descriptive names (e.g., RECURSIVE_LOOP, ATTENTION_SPLIT).
+**Token-Related Patterns (Only if clear evidence):**
+- **CONTEXT_OVERFLOW**: Performance degrades with input size AND truncation markers present
+- **HARD_TRUNCATION**: Output cut mid-sentence at token limit (requires explicit evidence)
+- **SOFT_TRUNCATION**: Rushed conclusion as limit approached (requires pattern evidence)
+
+For novel patterns, create descriptive names focusing on prompt/eval quality first.
+
+## Step 7: Token Usage Check (If Other Explanations Don't Fit)
+
+Only assess token usage when prompt/eval/business logic explanations are insufficient:
+1. **Token Budget Status**: Total used/available, distribution (prompt vs completion)
+2. **Truncation Detection**: >90% usage indicates risk, identify exact cutoff
+3. **Performance Correlation**: Does quality degrade with input size?
+4. **Evidence Requirements**: Must have truncation markers, explicit errors, or clear patterns
+
+Note: Modern models handle large contexts well. Token issues require clear evidence, not assumptions.
 
 ## Few-Shot Examples from Real Traces
 
@@ -1015,72 +1055,87 @@ If retrieval is incomplete when stopping, explicitly state remaining items in co
 - [ ] Coverage explicitly tracked and reported"""
 
 # Stage-specific user prompts for 4-stage analysis
-STAGE1_TRACE_ANALYSIS_PROMPT_V1 = """Task: Produce an evidence-backed timeline of agent execution with token awareness.
+STAGE1_TRACE_ANALYSIS_PROMPT_V1 = """Task: Produce an evidence-backed timeline of agent execution focusing on prompt quality and behavioral patterns.
 
 File Search Protocol:
-1. Check token health first - usage, truncation, distribution
-2. Query for: "run", "tool", "input", "output", "error", "exception", "token", "limit"
-3. Build timeline with token usage per run
-4. Identify failure points and anomalies
-5. Track retrieval coverage (max 6 passes, 8 results each)
+1. Analyze prompt structure and clarity - system prompts, user instructions, examples
+2. Query for: "run", "tool", "input", "output", "error", "exception", "prompt", "instruction"
+3. Build timeline with prompt context and behavioral patterns
+4. Identify failure points and prompt-related anomalies
+5. Check token usage only if behavioral analysis is insufficient
+6. Track retrieval coverage (max 6 passes, 8 results each)
 
 Required Output (JSON only):
-- timeline[]: Ordered runs with inputs/outputs, tool calls, and token usage
-- events[]: Failures, retries, anomalies with business impact
+- timeline[]: Ordered runs with inputs/outputs, tool calls, prompt context, and behavioral patterns
+- events[]: Failures, retries, anomalies with business impact and prompt correlation
 - coverage: Files scanned, runs analyzed, remaining items
 - evidence[]: Supporting quotes with file citations
+- prompt_analysis: Quality assessment of prompts used
 
-Focus on WHERE execution diverged from expectations and HOW tokens affected behavior."""
+Focus on WHERE execution diverged from expectations and WHY prompts may have caused the behavior."""
 
-STAGE2_GAP_ANALYSIS_PROMPT_V1 = """Task: Compare actual behavior vs expectations using Stage 1 analysis and eval files.
+STAGE2_GAP_ANALYSIS_PROMPT_V1 = """Task: Compare actual behavior vs expectations using Stage 1 analysis and eval files. Focus on behavioral and functional gaps, not token-related explanations.
 
 File Search Protocol:
-1. Review Stage 1 timeline and token health
+1. Review Stage 1 timeline and prompt analysis
 2. Retrieve eval files and expectation definitions via file search
 3. For each expectation, determine: met/partial/missing/incorrect
-4. Assess business impact of each gap
-5. Track additional retrievals (continuing coverage from Stage 1)
+4. Focus on: Prompt ambiguity, missing instructions, eval blind spots, business logic misalignment
+5. De-prioritize: Token-related explanations unless clear evidence exists
+6. Track additional retrievals (continuing coverage from Stage 1)
 
 Required Output (JSON only):
-- gaps[]: Each expectation with status, evidence, severity, business impact
-- metrics: Success rate, critical gaps count
+- gaps[]: Each expectation with status, evidence, severity, business impact, and prompt correlation
+- behavioral_gaps[]: Specific behavior mismatches with prompt/eval root causes
+- metrics: Success rate, critical gaps count, prompt/eval gap ratio
 - coverage: Eval files analyzed, new retrievals, remaining items
 
 Stage 1 Results (for context):
 {stage1_json}"""
 
-STAGE3_DIAGNOSIS_PROMPT_V1 = """Task: Diagnose root causes with evidence chains and confidence levels.
+STAGE3_DIAGNOSIS_PROMPT_V1 = """Task: Diagnose root causes with evidence chains and confidence levels. Prioritize prompt/eval explanations over token issues.
 
 File Search Protocol:
 1. Review Stage 1 timeline and Stage 2 gaps
 2. Re-retrieve specific spans for verification
 3. Build causal chains: symptom → mechanism → root cause
-4. Check for patterns (CONTEXT_OVERFLOW, INSTRUCTION_GAP, FORMAT_VIOLATION, etc.)
-5. Assess confidence based on evidence strength
+4. Check patterns in priority order: INSTRUCTION_GAP, PROMPT_CONTRADICTION, EVAL_MISMATCH, BUSINESS_LOGIC_ERROR, FORMAT_VIOLATION, then others
+5. Only consider token patterns (CONTEXT_OVERFLOW) if prompt/eval explanations insufficient
+6. Assess confidence based on evidence strength
+
+Pattern Priority (check in this order):
+1. INSTRUCTION_GAP - Missing or unclear prompt instructions
+2. PROMPT_CONTRADICTION - Conflicting directives in prompts  
+3. EVAL_MISMATCH - Evaluation criteria misaligned with needs
+4. BUSINESS_LOGIC_ERROR - Requirements not properly encoded
+5. FORMAT_VIOLATION - Output structure issues
+6. (Only if above don't fit) CONTEXT_OVERFLOW - Token-related issues
 
 Required Output (JSON only):
-- causes[]: Hypotheses with evidence chains, likelihood, category
-- remediations[]: Targeted fixes with priority and effort estimate
+- causes[]: Hypotheses with evidence chains, likelihood, category, pattern type
+- remediations[]: Targeted fixes with priority and effort estimate, focusing on prompt/eval improvements
 - confidence: Overall diagnosis confidence with rationale
 
 Previous Results:
 Stage 1: {stage1_json}
 Stage 2: {stage2_json}"""
 
-STAGE4_SYNTHESIS_PROMPT_V1 = """Task: Synthesize findings into executive summary with prioritized actions.
+STAGE4_SYNTHESIS_PROMPT_V1 = """Task: Synthesize findings into executive summary with prioritized actions focusing on prompt and evaluation improvements.
 
 Protocol (No file search needed):
 1. Review all previous analysis stages
-2. Extract key business impacts
-3. Prioritize fixes by value/effort
-4. Translate technical issues to business language
-5. Define success criteria for fixes
+2. Extract key business impacts from prompt/eval gaps
+3. Prioritize prompt and evaluation fixes by value/effort
+4. Translate technical prompt issues to business language
+5. Define success criteria for prompt/eval improvements
+6. De-emphasize token optimizations unless they were the clear primary cause
 
 Required Output (JSON only):
-- summary: Executive summary, problem statement, business impact, timeline
-- top_findings[]: Key discoveries with confidence levels
-- actions_next[]: Prioritized recommendations with owners and timelines
+- summary: Executive summary emphasizing prompt quality and eval coverage improvements
+- top_findings[]: Key discoveries with confidence levels, prioritizing prompt/eval insights
+- actions_next[]: Prioritized recommendations focusing on prompt clarity, eval coverage, and business alignment
 - metrics: Analysis quality indicators
+- improvement_focus: Specific prompt/eval areas needing attention
 
 All Results:
 Stage 1: {stage1_json}

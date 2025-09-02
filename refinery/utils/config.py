@@ -85,6 +85,12 @@ class RefineryConfig:
     debug: bool = False
     cache_ttl: int = 900  # seconds
     
+    # Hypothesis generation settings (for customer experiments)
+    hypothesis_llm_provider: str = "openai"
+    hypothesis_model: str = "gpt-5"  # GPT-5 exists as of Sept 2025
+    hypothesis_temperature: float = 0.0  # Deterministic generation
+    hypothesis_max_tokens: int = 4000
+    
     # Safety settings
     max_file_size_kb: int = 1000
     max_changes_per_hypothesis: int = 10
@@ -112,6 +118,10 @@ class RefineryConfig:
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             debug=os.getenv("DEBUG", "false").lower() == "true",
             cache_ttl=int(os.getenv("CACHE_TTL", "900")),
+            hypothesis_llm_provider=os.getenv("HYPOTHESIS_LLM_PROVIDER", "openai"),
+            hypothesis_model=os.getenv("HYPOTHESIS_MODEL", "gpt-5"),
+            hypothesis_temperature=float(os.getenv("HYPOTHESIS_TEMPERATURE", "0.0")),
+            hypothesis_max_tokens=int(os.getenv("HYPOTHESIS_MAX_TOKENS", "4000")),
             max_file_size_kb=int(os.getenv("MAX_FILE_SIZE_KB", "1000")),
             max_changes_per_hypothesis=int(os.getenv("MAX_CHANGES_PER_HYPOTHESIS", "10")),
             require_approval_for_changes=os.getenv("REQUIRE_APPROVAL_FOR_CHANGES", "true").lower() == "true",
@@ -135,6 +145,22 @@ class RefineryConfig:
         
         if self.llm_provider == "gemini" and not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY is required when using Gemini provider")
+        
+        # Validate hypothesis-specific LLM settings
+        if self.hypothesis_llm_provider == "openai" and not self.openai_api_key:
+            raise ValueError("OPENAI_API_KEY is required for hypothesis generation")
+        
+        if self.hypothesis_llm_provider == "anthropic" and not self.anthropic_api_key:
+            raise ValueError("ANTHROPIC_API_KEY is required for hypothesis generation")
+        
+        if self.hypothesis_llm_provider == "gemini" and not self.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY is required for hypothesis generation")
+        
+        if self.hypothesis_temperature < 0.0 or self.hypothesis_temperature > 2.0:
+            raise ValueError("hypothesis_temperature must be between 0.0 and 2.0")
+        
+        if self.hypothesis_max_tokens < 100 or self.hypothesis_max_tokens > 16000:
+            raise ValueError("hypothesis_max_tokens must be between 100 and 16000")
 
 
 # Global config instance

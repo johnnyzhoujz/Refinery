@@ -14,6 +14,7 @@ from ..integrations.llm_provider import create_llm_provider
 from ..integrations.code_manager import SafeCodeManager
 from ..agents.staged_failure_analyst import StagedFailureAnalyst
 from ..agents.hypothesis_generator import AdvancedHypothesisGenerator
+from ..experiments.customer_experiment_manager import CustomerExperimentManager
 from ..analysis.simple_code_reader import build_simple_context
 from ..knowledge.gpt41_patterns import gpt41_knowledge
 # Removed AgentContextResolver - using simple file passing instead
@@ -31,6 +32,8 @@ class RefineryOrchestrator:
         self.code_manager = SafeCodeManager(codebase_path)
         self.failure_analyst = StagedFailureAnalyst()  # Use staged approach to avoid token limits
         self.hypothesis_generator = AdvancedHypothesisGenerator()
+        # Initialize customer experiment manager for hypothesis versions
+        self.version_control = CustomerExperimentManager(codebase_path)
 # Removed AgentContextResolver - using simple file passing instead
     
     async def _init_async(self):
@@ -130,13 +133,53 @@ class RefineryOrchestrator:
         logger.info("Generated hypotheses", count=len(ranked_hypotheses))
         return ranked_hypotheses[:max_hypotheses]
     
+    async def generate_hypotheses_from_trace(
+        self,
+        diagnosis: Diagnosis,
+        trace: "Trace",
+        max_hypotheses: int = 1
+    ) -> List[Hypothesis]:
+        """Generate hypotheses using trace for prompt extraction and rewriting."""
+        logger.info("Generating hypotheses from trace", failure_type=diagnosis.failure_type.value)
+        
+        # Get model-specific best practices based on trace model or default
+        model = getattr(trace, 'model', None) or config.hypothesis_model
+        best_practices = await self.hypothesis_generator.search_best_practices(
+            failure_type=diagnosis.failure_type.value,
+            model=model,
+            context={"diagnosis": diagnosis.root_cause}
+        )
+        
+        # Generate hypotheses with full trace context (this will extract prompts internally)
+        hypotheses = await self.hypothesis_generator.generate_hypotheses(
+            diagnosis=diagnosis,
+            trace=trace,  # Pass full trace for prompt extraction
+            code_context=None,  # Not needed for trace-based generation
+            best_practices=best_practices
+        )
+        
+        logger.info("Generated trace-based hypotheses", count=len(hypotheses))
+        return hypotheses[:max_hypotheses]
+    
     async def apply_hypothesis(
         self,
         hypothesis: Hypothesis,
-        dry_run: bool = True
+        dry_run: bool = True,
+        save_version: bool = True,
+        tag: Optional[str] = None
     ) -> dict:
-        """Apply a hypothesis (with optional dry run)."""
-        logger.info("Applying hypothesis", hypothesis_id=hypothesis.id, dry_run=dry_run)
+        """Apply a hypothesis (with optional dry run) and save version."""
+        logger.info("Applying hypothesis", hypothesis_id=hypothesis.id, dry_run=dry_run, save_version=save_version)
+        
+        # Always save version first (for reproducibility and rollback)
+        version_id = None
+        if save_version:
+            try:
+                version_id = self.version_control.save_version(hypothesis, tag)
+                logger.info("Saved hypothesis version", version_id=version_id)
+            except Exception as e:
+                logger.error("Failed to save version", error=str(e))
+                # Continue with validation/application even if version save fails
         
         if dry_run:
             # Validate changes without applying
@@ -153,6 +196,7 @@ class RefineryOrchestrator:
             return {
                 "dry_run": True,
                 "hypothesis_id": hypothesis.id,
+                "version_id": version_id,
                 "validation_results": results,
                 "all_valid": all(r["valid"] for r in results)
             }
@@ -163,7 +207,8 @@ class RefineryOrchestrator:
                     hypothesis.proposed_changes,
                     f"Fix: {hypothesis.description}"
                 )
-                logger.info("Successfully applied hypothesis", commit_id=result.get("commit_id"))
+                result["version_id"] = version_id  # Include version info in result
+                logger.info("Successfully applied hypothesis", commit_id=result.get("commit_id"), version_id=version_id)
                 return result
             except Exception as e:
                 logger.error("Failed to apply hypothesis", error=str(e))
@@ -173,6 +218,34 @@ class RefineryOrchestrator:
         """Rollback changes to a previous state."""
         logger.info("Rolling back changes", commit_id=commit_id)
         return await self.code_manager.rollback_changes(commit_id)
+    
+    # Version control convenience methods
+    def list_versions(self) -> List[dict]:
+        """List all saved versions."""
+        return self.version_control.list_versions()
+    
+    def get_version(self, version_id: str) -> Optional[dict]:
+        """Get version metadata."""
+        return self.version_control.get_version(version_id)
+    
+    def stage_version(self, version_id: str) -> str:
+        """Stage version for testing."""
+        staged_path = self.version_control.stage_version(version_id)
+        logger.info("Staged version for testing", version_id=version_id, path=str(staged_path))
+        return str(staged_path)
+    
+    def deploy_version(self, version_id: str, confirm: bool = False) -> str:
+        """Deploy version to production with backup."""
+        if not confirm:
+            raise ValueError("Deploy requires explicit confirmation (confirm=True)")
+        
+        backup_id = self.version_control.deploy_version(version_id, confirm=True)
+        logger.info("Deployed version to production", version_id=version_id, backup_id=backup_id)
+        return backup_id
+    
+    def diff_versions(self, version1_id: str, version2_id: str) -> dict:
+        """Compare two versions."""
+        return self.version_control.diff_versions(version1_id, version2_id)
     
     async def read_existing_implementation(self, file_patterns: List[str]) -> dict:
         """Read existing prompt/eval files to understand current implementation."""

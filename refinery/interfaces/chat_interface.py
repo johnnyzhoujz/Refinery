@@ -83,6 +83,16 @@ class BaseChatInterface(ABC):
     async def show_error(self, message: str):
         """Display error message."""
         pass
+    
+    @abstractmethod
+    async def ask_yes_no(self, message: str) -> bool:
+        """Ask user a yes/no question."""
+        pass
+    
+    @abstractmethod
+    async def show_hypothesis_comparison(self, hypothesis):
+        """Show before/after comparison of hypothesis."""
+        pass
 
 
 class ChatInterface(BaseChatInterface):
@@ -301,3 +311,38 @@ Let's get started!
     async def show_error(self, message: str):
         """Display error message."""
         self.console.print(f"\n[bold red]❌ {message}[/bold red]")
+    
+    async def ask_yes_no(self, message: str) -> bool:
+        """Ask user a yes/no question."""
+        response = self.console.input(f"\n[bold cyan]{message}[/bold cyan] (y/n): ").strip().lower()
+        return response in ['y', 'yes', '1', 'true']
+    
+    async def show_hypothesis_comparison(self, hypothesis):
+        """Show before/after comparison of hypothesis."""
+        if not hypothesis.proposed_changes:
+            self.console.print("[yellow]No changes to display[/yellow]")
+            return
+            
+        # Show hypothesis details
+        self.console.print(Panel(
+            f"**Description:** {hypothesis.description}\n\n"
+            f"**Rationale:** {hypothesis.rationale}\n\n"
+            f"**Confidence:** {hypothesis.confidence.value}\n\n"
+            f"**Files affected:** {len(hypothesis.proposed_changes)}",
+            title="🤖 Generated Hypothesis",
+            border_style="green"
+        ))
+        
+        # Show before/after for each change
+        for change in hypothesis.proposed_changes:
+            before_text = change.original_content[:500] + "..." if len(change.original_content) > 500 else change.original_content
+            after_text = change.new_content[:500] + "..." if len(change.new_content) > 500 else change.new_content
+            
+            comparison_text = f"## Before (Current)\n```\n{before_text}\n```\n\n"
+            comparison_text += f"## After (Proposed)\n```\n{after_text}\n```"
+            
+            self.console.print(Panel(
+                Markdown(comparison_text),
+                title=f"📝 {change.file_path}",
+                border_style="blue"
+            ))

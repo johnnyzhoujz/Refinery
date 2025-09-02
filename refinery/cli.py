@@ -591,6 +591,255 @@ def list_failures(project: str, limit: int):
     console.print("[yellow]This command will be implemented by the LangSmith subagent.[/yellow]")
 
 
+# Version Control Commands (GPT-5 Integration)
+
+@main.command()
+@click.argument('trace_id')
+@click.option('--project', required=True, help='Project name for context')
+@click.option('--expected', required=True, help='What should have happened')
+@click.option('--tag', help='Optional tag for this version')
+@click.option('--codebase', default='.', help='Path to codebase')
+def generate(trace_id: str, project: str, expected: str, tag: str, codebase: str):
+    """Generate hypothesis version from trace analysis (GPT-5 powered)."""
+    
+    async def run_generate():
+        console.print(f"[blue]Generating hypothesis version for trace {trace_id}...[/blue]")
+        
+        try:
+            # Use existing context for the project
+            codebase_abs = os.path.abspath(codebase)
+            context_manager = RefineryContext(codebase_abs)
+            
+            # Try to load existing context first
+            prompt_contents, eval_contents, config_contents = context_manager.load_context_for_project(project)
+            
+            if not prompt_contents and not eval_contents:
+                console.print(f"[yellow]No saved context found for project '{project}'. Please run 'refinery analyze' first to set up context.[/yellow]")
+                return
+            
+            # Create orchestrator and run analysis
+            orchestrator = await create_orchestrator(codebase_abs)
+            
+            console.print("[blue]Running failure analysis with GPT-4o...[/blue]")
+            with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+                task = progress.add_task("Analyzing trace...", total=None)
+                
+                analysis = await orchestrator.analyze_failure(
+                    trace_id=trace_id,
+                    project=project,
+                    expected_behavior=expected,
+                    prompt_contents=prompt_contents,
+                    eval_contents=eval_contents
+                )
+                
+                progress.update(task, description="Generating hypotheses with GPT-5...")
+                
+                hypotheses = await orchestrator.generate_hypotheses(
+                    diagnosis=analysis.diagnosis,
+                    code_context=analysis.code_context,
+                    max_hypotheses=3
+                )
+            
+            if not hypotheses:
+                console.print("[red]No hypotheses generated.[/red]")
+                return
+            
+            # Apply the best hypothesis with version saving
+            best_hypothesis = hypotheses[0]
+            console.print(f"[green]Generated hypothesis: {best_hypothesis.description}[/green]")
+            
+            result = await orchestrator.apply_hypothesis(
+                best_hypothesis, 
+                dry_run=True,  # Generate version but don't deploy yet
+                save_version=True,
+                tag=tag
+            )
+            
+            version_id = result.get('version_id')
+            if version_id:
+                console.print(f"[green]✅ Saved as version: {version_id}[/green]")
+                console.print(f"[blue]Use 'refinery test {version_id}' to stage for testing[/blue]")
+                console.print(f"[blue]Use 'refinery deploy {version_id} --confirm' to apply to production[/blue]")
+            else:
+                console.print("[red]Failed to save version[/red]")
+        
+        except Exception as e:
+            console.print(f"[red]Error generating version: {e}[/red]")
+    
+    asyncio.run(run_generate())
+
+
+@main.command()
+@click.argument('version_id')
+@click.option('--codebase', default='.', help='Path to codebase')
+def test(version_id: str, codebase: str):
+    """Stage version for testing in .refinery/staging/."""
+    
+    async def run_test():
+        try:
+            codebase_abs = os.path.abspath(codebase)
+            orchestrator = create_orchestrator(codebase_abs)
+            
+            console.print(f"[blue]Staging version {version_id} for testing...[/blue]")
+            staged_path = orchestrator.stage_version(version_id)
+            
+            console.print(f"[green]✅ Staged at: {staged_path}[/green]")
+            console.print(f"[blue]Run your tests against files in this directory[/blue]")
+            console.print(f"[blue]Use 'refinery deploy {version_id} --confirm' when ready to apply[/blue]")
+        
+        except Exception as e:
+            console.print(f"[red]Error staging version: {e}[/red]")
+    
+    asyncio.run(run_test())
+
+
+@main.command()
+@click.argument('version1_id')
+@click.argument('version2_id', required=False)
+@click.option('--codebase', default='.', help='Path to codebase')
+def diff(version1_id: str, version2_id: str, codebase: str):
+    """Compare two versions (or version vs current)."""
+    
+    async def run_diff():
+        try:
+            codebase_abs = os.path.abspath(codebase)
+            orchestrator = create_orchestrator(codebase_abs)
+            
+            if version2_id:
+                console.print(f"[blue]Comparing {version1_id} vs {version2_id}...[/blue]")
+                diff_result = orchestrator.diff_versions(version1_id, version2_id)
+            else:
+                console.print(f"[blue]Showing version {version1_id} details...[/blue]")
+                version_info = orchestrator.get_version(version1_id)
+                if not version_info:
+                    console.print(f"[red]Version {version1_id} not found[/red]")
+                    return
+                
+                # Show version details
+                table = Table(title=f"Version {version1_id}")
+                table.add_column("Field", style="cyan")
+                table.add_column("Value", style="white")
+                
+                table.add_row("Created", version_info.get("created_at", "Unknown"))
+                table.add_row("Description", version_info.get("description", "No description"))
+                table.add_row("Tag", version_info.get("tag", "None"))
+                table.add_row("Files", str(len(version_info.get("files", []))))
+                
+                console.print(table)
+                
+                if version_info.get("files"):
+                    console.print("\n[bold]Files in this version:[/bold]")
+                    for file_info in version_info["files"]:
+                        console.print(f"  • {file_info['path']}")
+                return
+            
+            # Show diff results
+            changes = diff_result.get("changes", [])
+            if not changes:
+                console.print("[green]No differences found[/green]")
+                return
+            
+            table = Table(title=f"Differences: {version1_id} → {version2_id}")
+            table.add_column("Change Type", style="cyan")
+            table.add_column("File Path", style="white")
+            
+            for change in changes:
+                change_type = change["type"]
+                if change_type == "added":
+                    table.add_row(f"[green]+[/green] Added", change["path"])
+                elif change_type == "removed":
+                    table.add_row(f"[red]-[/red] Removed", change["path"])
+                else:
+                    table.add_row(f"[yellow]~[/yellow] Modified", change["path"])
+            
+            console.print(table)
+        
+        except Exception as e:
+            console.print(f"[red]Error comparing versions: {e}[/red]")
+    
+    asyncio.run(run_diff())
+
+
+@main.command()
+@click.argument('version_id')
+@click.option('--confirm', is_flag=True, help='Confirm deployment (required)')
+@click.option('--codebase', default='.', help='Path to codebase')
+def deploy(version_id: str, confirm: bool, codebase: str):
+    """Deploy version to production with automatic backup."""
+    
+    async def run_deploy():
+        if not confirm:
+            console.print("[red]Deploy requires explicit confirmation: --confirm[/red]")
+            console.print("[blue]This will modify your prompt files. Use --confirm to proceed.[/blue]")
+            return
+        
+        try:
+            codebase_abs = os.path.abspath(codebase)
+            orchestrator = create_orchestrator(codebase_abs)
+            
+            # Show version info first
+            version_info = orchestrator.get_version(version_id)
+            if not version_info:
+                console.print(f"[red]Version {version_id} not found[/red]")
+                return
+            
+            console.print(f"[yellow]⚠️  About to deploy version {version_id} to production[/yellow]")
+            console.print(f"Description: {version_info.get('description', 'No description')}")
+            console.print(f"Files to modify: {len(version_info.get('files', []))}")
+            
+            for file_info in version_info.get("files", []):
+                console.print(f"  • {file_info['path']}")
+            
+            console.print(f"[blue]Deploying with automatic backup...[/blue]")
+            backup_id = orchestrator.deploy_version(version_id, confirm=True)
+            
+            console.print(f"[green]✅ Successfully deployed version {version_id}[/green]")
+            console.print(f"[blue]Backup saved as: {backup_id}[/blue]")
+            console.print(f"[blue]Files are now live in your prompts/ directory[/blue]")
+        
+        except Exception as e:
+            console.print(f"[red]Error deploying version: {e}[/red]")
+    
+    asyncio.run(run_deploy())
+
+
+@main.command(name='list-versions')
+@click.option('--codebase', default='.', help='Path to codebase')
+def list_versions_cmd(codebase: str):
+    """List all saved versions."""
+    
+    try:
+        codebase_abs = os.path.abspath(codebase)
+        orchestrator = create_orchestrator(codebase_abs)
+        
+        versions = orchestrator.list_versions()
+        
+        if not versions:
+            console.print("[yellow]No versions found[/yellow]")
+            return
+        
+        table = Table(title="Saved Versions")
+        table.add_column("Version ID", style="cyan")
+        table.add_column("Created", style="white")
+        table.add_column("Tag", style="green")
+        table.add_column("Description", style="white")
+        table.add_column("Files", justify="right", style="blue")
+        
+        for version in versions:
+            table.add_row(
+                version["version_id"],
+                version["created_at"][:19] if version.get("created_at") else "Unknown",
+                version.get("tag") or "None",
+                (version.get("description") or "No description")[:60],
+                str(version.get("files_count", 0))
+            )
+        
+        console.print(table)
+    
+    except Exception as e:
+        console.print(f"[red]Error listing versions: {e}[/red]")
+
+
 @main.command()
 @click.option('--project', default='default', help='Project name (default: default)')
 @click.option('--codebase', default='.', help='Path to codebase (default: current directory)')
