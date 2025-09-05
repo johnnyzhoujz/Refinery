@@ -120,7 +120,7 @@ async def run_chat_session(
             
             try:
                 # Get the trace for prompt extraction
-                trace = await orchestrator.langsmith_client.get_trace(trace_id)
+                trace = await orchestrator.langsmith_client.fetch_trace(trace_id)
                 
                 # Generate hypothesis with rewritten prompts
                 hypotheses = await orchestrator.generate_hypotheses_from_trace(

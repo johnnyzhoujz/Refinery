@@ -48,7 +48,7 @@ class RefineryContext:
                 
             # Handle version migration if needed
             if data.get("version") != CONTEXT_VERSION:
-                logger.warning("Context version mismatch, migrating", 
+                logger.debug("Context version mismatch, migrating", 
                              old_version=data.get("version"), 
                              new_version=CONTEXT_VERSION)
                 # In future, add migration logic here
@@ -61,6 +61,10 @@ class RefineryContext:
     def _save_all_contexts(self, data: Dict[str, Any]) -> None:
         """Save all project contexts to file."""
         try:
+            # Ensure version is always included in the root
+            if "version" not in data:
+                data["version"] = CONTEXT_VERSION
+            
             with open(self.context_file, 'w') as f:
                 json.dump(data, f, indent=2)
             logger.info("Saved context", file=str(self.context_file))

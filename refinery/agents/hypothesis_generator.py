@@ -96,8 +96,24 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             from ..integrations.langsmith_client_simple import create_langsmith_client
             langsmith_client = await create_langsmith_client()
             extracted = langsmith_client.extract_prompts_from_trace(trace)
-            original_prompts = extracted.get("system_prompts", []) + extracted.get("user_prompts", [])
-            logger.info(f"Extracted {len(original_prompts)} prompts from trace")
+            
+            # Add system prompts with inline metadata
+            for i, p in enumerate(extracted.get("system_prompts", [])):
+                if isinstance(p, dict):
+                    prompt_text = f"[SYSTEM PROMPT from run: {p.get('run_name', 'unknown')}]\n{p.get('content', '')}"
+                else:
+                    prompt_text = f"[SYSTEM PROMPT {i}]\n{p}"
+                original_prompts.append(prompt_text)
+
+            # Add user prompts with inline metadata  
+            for i, p in enumerate(extracted.get("user_prompts", [])):
+                if isinstance(p, dict):
+                    prompt_text = f"[USER PROMPT from run: {p.get('run_name', 'unknown')}]\n{p.get('content', '')}"
+                else:
+                    prompt_text = f"[USER PROMPT {i}]\n{p}"
+                original_prompts.append(prompt_text)
+                
+            logger.info(f"Extracted {len(original_prompts)} prompts from trace with metadata")
         
         # If we have trace prompts, use trace-based generation
         if trace and original_prompts:
@@ -627,20 +643,75 @@ Return as JSON array of hypothesis objects."""
                 prompt=prompt,
                 system_prompt=TRACE_BASED_HYPOTHESIS_SYSTEM_PROMPT,
                 temperature=0.0,  # Deterministic
-                max_tokens=config.hypothesis_max_tokens
+                max_tokens=self.hypothesis_max_tokens
             )
             
+            # Debug logging (can be removed in production)
+            logger.debug(f"GPT-5 response length: {len(response)} characters")
+            
+            # Detect which prompt GPT-5 modified (simple heuristic approach)
+            prompt_index = 0
+            if "PROMPT" in response and ("from run:" in response or any(f"PROMPT {i}" in response for i in range(10))):
+                import re
+                match = re.search(r'(?:PROMPT|prompt)\s+(\d+)', response)
+                if match:
+                    prompt_index = int(match.group(1))
+
+            # Clean the response to get just the new prompt content
+            new_prompt_content = response
+            
+            # Strip metadata headers if GPT-5 included them in the response
+            for marker in ["[SYSTEM PROMPT", "[USER PROMPT", "---PROMPT"]:
+                if marker in new_prompt_content:
+                    logger.debug(f"Found marker '{marker}' in response, stripping metadata")
+                    lines = new_prompt_content.split('\n')
+                    content_lines = []
+                    skip_header = False
+                    for line in lines:
+                        if line.startswith('[') and 'PROMPT' in line:
+                            skip_header = True
+                            continue
+                        if skip_header and line.strip() == '':
+                            skip_header = False
+                            continue
+                        if not skip_header:
+                            content_lines.append(line)
+                    
+                    if content_lines:
+                        new_prompt_content = '\n'.join(content_lines)
+                    break
+
             # Parse the response to extract the rewritten prompt
-            new_prompt_content = self._parse_trace_based_response(response)
+            new_prompt_content = self._parse_trace_based_response(new_prompt_content)
+            
+            logger.debug(f"Final parsed content length: {len(new_prompt_content) if new_prompt_content else 0}")
             
             if new_prompt_content:
                 # Create FileChange with original and new content
+                # Extract original content from the selected prompt (strip metadata header)
+                if prompt_index < len(original_prompts):
+                    original_with_metadata = original_prompts[prompt_index]
+                    # Strip metadata header to get clean original content
+                    lines = original_with_metadata.split('\n')
+                    if lines and lines[0].startswith('[') and 'PROMPT' in lines[0]:
+                        original_clean = '\n'.join(lines[1:])
+                    else:
+                        original_clean = original_with_metadata
+                else:
+                    # Fallback to first prompt if index is out of range
+                    original_with_metadata = original_prompts[0] if original_prompts else ""
+                    lines = original_with_metadata.split('\n')
+                    if lines and lines[0].startswith('[') and 'PROMPT' in lines[0]:
+                        original_clean = '\n'.join(lines[1:])
+                    else:
+                        original_clean = original_with_metadata
+                
                 changes = [FileChange(
-                    file_path="prompts/system.py",  # Default file path
-                    original_content=original_prompts[0],  # Use first prompt as original
+                    file_path=f"prompts/prompt_{prompt_index}.txt",  # Dynamic based on which prompt was modified
+                    original_content=original_clean,
                     new_content=new_prompt_content,
                     change_type=ChangeType.PROMPT_MODIFICATION,
-                    description="Complete prompt rewrite based on trace analysis and best practices"
+                    description=f"Complete prompt rewrite for prompt {prompt_index} based on trace analysis and best practices"
                 )]
                 
                 # Create hypothesis
@@ -712,8 +783,8 @@ Failure Type: {diagnosis.failure_type.value}
 Evidence: {diagnosis.evidence}
 Confidence: {diagnosis.confidence.value}
 
-## ORIGINAL PROMPT
-{original_prompts[0] if original_prompts else "No prompt available"}
+## ORIGINAL PROMPTS ({len(original_prompts)} total)
+{chr(10).join([f"---PROMPT {i}---\n{p}\n" for i, p in enumerate(original_prompts[:10])])}
 
 ## MODEL-SPECIFIC GUIDE
 {model_guide}
