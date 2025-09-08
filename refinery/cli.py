@@ -857,5 +857,36 @@ def chat(project: str, codebase: str):
     asyncio.run(run_chat())
 
 
+@main.command()
+def ui():
+    """Launch Streamlit UI."""
+    import subprocess
+    import sys
+    import os
+    from pathlib import Path
+    
+    # Set environment to skip Streamlit welcome screen
+    env = os.environ.copy()
+    env['STREAMLIT_BROWSER_GATHER_USAGE_STATS'] = 'false'
+    
+    console.print("[blue]🔬 Launching Refinery Web UI...[/blue]")
+    console.print("[dim]Starting server and opening browser...[/dim]")
+    
+    ui_path = Path(__file__).parent / "ui" / "app.py"
+    
+    try:
+        subprocess.run([
+            sys.executable, "-m", "streamlit", "run", str(ui_path),
+            "--server.headless=false",
+            "--browser.gatherUsageStats=false",
+            "--global.showWarningOnDirectExecution=false"
+        ], env=env)
+    except KeyboardInterrupt:
+        console.print("[yellow]UI server stopped.[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error launching UI: {e}[/red]")
+        console.print("[blue]Try running manually: streamlit run refinery/ui/app.py[/blue]")
+
+
 if __name__ == "__main__":
     main()

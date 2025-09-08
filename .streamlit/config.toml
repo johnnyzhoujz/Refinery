@@ -1,0 +1,14 @@
+[global]
+showWarningOnDirectExecution = false
+
+[browser]
+gatherUsageStats = false
+
+[client]
+showErrorDetails = false
+toolbarMode = "minimal"
+
+[server]
+enableStaticServing = false
+enableCORS = false
+enableXsrfProtection = false
