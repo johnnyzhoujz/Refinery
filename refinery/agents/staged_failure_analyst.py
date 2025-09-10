@@ -175,7 +175,8 @@ class StagedFailureAnalyst(FailureAnalyst):
             json_schema_obj=TRACE_ANALYSIS_SCHEMA,
             max_num_results=8,
             max_output_tokens=2000,
-            temperature=0.2
+            temperature=0.2,
+            reasoning_effort="medium"
         )
         
         # Send request and parse response
@@ -249,6 +250,10 @@ class StagedFailureAnalyst(FailureAnalyst):
                 "temperature": chunked_config.temperature,
                 "max_output_tokens": chunked_config.max_output_tokens_stage1
             }
+            
+            # Add reasoning_effort for GPT-5 models
+            if "gpt-5" in self.model.lower():
+                body["reasoning_effort"] = "medium"
             
             # Make API call with retry logic
             try:
@@ -398,7 +403,8 @@ class StagedFailureAnalyst(FailureAnalyst):
             json_schema_obj=GAP_ANALYSIS_SCHEMA,
             max_num_results=chunked_config.max_num_results_other,  # 3 instead of 8
             max_output_tokens=chunked_config.max_output_tokens_other,  # 1000 instead of 2000
-            temperature=chunked_config.temperature  # 0.2
+            temperature=chunked_config.temperature,  # 0.2
+            reasoning_effort="medium"
         )
         
         # Send request and parse response
@@ -430,7 +436,8 @@ class StagedFailureAnalyst(FailureAnalyst):
             json_schema_obj=DIAGNOSIS_SCHEMA,
             max_num_results=chunked_config.max_num_results_other,  # 3 instead of 8
             max_output_tokens=chunked_config.max_output_tokens_other + 200,  # 1200 instead of 2500
-            temperature=chunked_config.temperature  # 0.2
+            temperature=chunked_config.temperature,  # 0.2
+            reasoning_effort="medium"
         )
         
         # Send request and parse response
@@ -461,7 +468,8 @@ class StagedFailureAnalyst(FailureAnalyst):
             user_text=user_prompt,
             json_schema_obj=SYNTHESIS_SCHEMA,
             max_output_tokens=2000,
-            temperature=0.2
+            temperature=0.2,
+            reasoning_effort="medium"
         )
         
         # Send request and parse response

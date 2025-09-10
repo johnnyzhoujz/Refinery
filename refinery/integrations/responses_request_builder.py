@@ -17,6 +17,7 @@ def build_responses_body(
     max_num_results: int = 8,
     max_output_tokens: int = 1000,
     temperature: float = 0.2,
+    reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Build a complete request body for OpenAI Responses API.
@@ -30,6 +31,7 @@ def build_responses_body(
         max_num_results: Max results per file search retrieval
         max_output_tokens: Max tokens in response
         temperature: Model temperature
+        reasoning_effort: Reasoning effort for GPT-5 models (minimal, low, medium, high)
     
     Returns:
         Complete request body for /v1/responses endpoint
@@ -39,7 +41,7 @@ def build_responses_body(
     if not json_schema_obj.get("type") == "object":
         raise ValueError("Schema must have root type: 'object'")
     
-    return {
+    body = {
         "model": model,
         "tools": [
             {
@@ -75,6 +77,12 @@ def build_responses_body(
         "temperature": temperature,
         "max_output_tokens": max_output_tokens
     }
+    
+    # Add reasoning_effort for GPT-5 models
+    if "gpt-5" in model.lower() and reasoning_effort:
+        body["reasoning_effort"] = reasoning_effort
+    
+    return body
 
 
 def build_responses_body_no_tools(
@@ -84,6 +92,7 @@ def build_responses_body_no_tools(
     json_schema_obj: Dict[str, Any],
     max_output_tokens: int = 1000,
     temperature: float = 0.2,
+    reasoning_effort: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Build a request body without file_search tools (for Stage 4 synthesis).
@@ -95,6 +104,7 @@ def build_responses_body_no_tools(
         json_schema_obj: JSON schema for structured output
         max_output_tokens: Max tokens in response
         temperature: Model temperature
+        reasoning_effort: Reasoning effort for GPT-5 models (minimal, low, medium, high)
     
     Returns:
         Complete request body for /v1/responses endpoint without tools
@@ -104,7 +114,7 @@ def build_responses_body_no_tools(
     if not json_schema_obj.get("type") == "object":
         raise ValueError("Schema must have root type: 'object'")
     
-    return {
+    body = {
         "model": model,
         "input": [
             {
@@ -133,6 +143,12 @@ def build_responses_body_no_tools(
         "temperature": temperature,
         "max_output_tokens": max_output_tokens
     }
+    
+    # Add reasoning_effort for GPT-5 models
+    if "gpt-5" in model.lower() and reasoning_effort:
+        body["reasoning_effort"] = reasoning_effort
+    
+    return body
 
 
 def build_canary_test_body() -> Dict[str, Any]:

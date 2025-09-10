@@ -173,11 +173,22 @@ if st.session_state.get("analysis"):
             try:
                 # Stream hypothesis generation
                 def hypothesis_stream():
-                    yield "💡 Analyzing failure patterns...\n"
+                    import time
+                    start_time = time.time()
+                    
+                    # Count system prompts from extracted data
+                    extracted = st.session_state.orchestrator.langsmith_client.extract_prompts_from_trace(st.session_state.trace)
+                    num_prompts = len(extracted.get("system_prompts", []))
+                    
+                    yield f"🔍 Analyzing {num_prompts} system prompts from trace...\n"
                     time.sleep(1)
-                    yield "🤖 GPT-5 generating improved prompts...\n"
-                    time.sleep(2)
-                    yield "✅ Hypotheses generated!\n"
+                    yield f"🤔 GPT-5 reasoning about which prompts need modification...\n"
+                    time.sleep(1)
+                    yield f"⏱️ Processing (elapsed: {int(time.time() - start_time)}s)...\n"
+                    time.sleep(1)
+                    yield "📝 Applying 20% length constraint to modifications...\n"
+                    time.sleep(1)
+                    yield "✅ Hypothesis generation complete!\n"
                 
                 st.write_stream(hypothesis_stream)
                 
@@ -197,6 +208,10 @@ if st.session_state.get("analysis"):
                     st.success("Hypothesis generated!")
                 else:
                     st.error("No hypotheses generated.")
+                    st.info("💡 This could mean:")
+                    st.write("• GPT-5 determined no prompts need modification (all were skipped)")
+                    st.write("• Response parsing failed - GPT-5 may have used unexpected format")
+                    st.write("• An error occurred during generation - check browser console for details")
                 
             except Exception as e:
                 st.error(f"Hypothesis generation failed: {str(e)}")

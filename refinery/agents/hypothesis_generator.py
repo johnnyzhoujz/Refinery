@@ -105,13 +105,6 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
                     prompt_text = f"[SYSTEM PROMPT {i}]\n{p}"
                 original_prompts.append(prompt_text)
 
-            # Add user prompts with inline metadata  
-            for i, p in enumerate(extracted.get("user_prompts", [])):
-                if isinstance(p, dict):
-                    prompt_text = f"[USER PROMPT from run: {p.get('run_name', 'unknown')}]\n{p.get('content', '')}"
-                else:
-                    prompt_text = f"[USER PROMPT {i}]\n{p}"
-                original_prompts.append(prompt_text)
                 
             logger.info(f"Extracted {len(original_prompts)} prompts from trace with metadata")
         
@@ -643,11 +636,15 @@ Return as JSON array of hypothesis objects."""
                 prompt=prompt,
                 system_prompt=TRACE_BASED_HYPOTHESIS_SYSTEM_PROMPT,
                 temperature=0.0,  # Deterministic
-                max_tokens=self.hypothesis_max_tokens
+                max_tokens=self.hypothesis_max_tokens,
+                reasoning_effort="medium"  # Enable GPT-5 thinking
             )
             
             # Debug logging (can be removed in production)
             logger.debug(f"GPT-5 response length: {len(response)} characters")
+            logger.debug(f"GPT-5 response preview: {response[:500]}...")
+            if "SKIPPING" in response:
+                logger.info("GPT-5 response contains SKIPPING - some/all prompts may not need changes")
             
             # Detect which prompt GPT-5 modified (simple heuristic approach)
             prompt_index = 0
@@ -706,6 +703,22 @@ Return as JSON array of hypothesis objects."""
                     else:
                         original_clean = original_with_metadata
                 
+                # Validate length constraint (20% rule)
+                if original_clean:
+                    original_len = len(original_clean)
+                    new_len = len(new_prompt_content)
+                    length_change_pct = ((new_len - original_len) / original_len) * 100
+                    
+                    if abs(length_change_pct) > 20:
+                        logger.warning(f"Length constraint violated: {length_change_pct:+.1f}% change (max ±20%)")
+                        # Enforce the constraint by truncating if too long
+                        if new_len > original_len * 1.2:  # More than 20% longer
+                            max_len = int(original_len * 1.2)
+                            new_prompt_content = new_prompt_content[:max_len] + "..."
+                            logger.info(f"Truncated response to {max_len} chars to enforce 20% limit")
+                    else:
+                        logger.debug(f"Length constraint satisfied: {length_change_pct:+.1f}% change")
+                
                 changes = [FileChange(
                     file_path=f"prompts/prompt_{prompt_index}.txt",  # Dynamic based on which prompt was modified
                     original_content=original_clean,
@@ -730,11 +743,37 @@ Return as JSON array of hypothesis objects."""
                 hypothesis.generation_metadata = self._create_generation_metadata(diagnosis)
                 
                 return hypothesis
+            else:
+                # Handle case where parsing returned None/empty
+                logger.debug("Parsed content is empty/None")
+                
+                # Check if GPT-5 indicated all prompts should be skipped
+                if "SKIPPING" in response:
+                    logger.info("GPT-5 indicated no prompts need modification")
+                    # Return a special hypothesis indicating no changes needed
+                    hypothesis = Hypothesis(
+                        id=str(uuid.uuid4()),
+                        description="No prompt modifications needed",
+                        rationale=f"Analysis indicates the prompts are not the root cause of this {diagnosis.failure_type.value.replace('_', ' ')}. The issue may be in other components or configuration.",
+                        proposed_changes=[],
+                        confidence=Confidence.LOW,
+                        risks=[],
+                        example_before="",
+                        example_after=""
+                    )
+                    hypothesis.generation_metadata = self._create_generation_metadata(diagnosis)
+                    return hypothesis
+                else:
+                    logger.warning(f"Unable to parse GPT-5 response. Response preview: {response[:200]}...")
+                    return None
                 
         except Exception as e:
-            logger.error(f"Failed to generate trace-based hypothesis: {e}")
-            
-        return None
+            error_msg = f"Failed to generate trace-based hypothesis: {str(e)}"
+            logger.error(error_msg)
+            # Don't silently return None - let the caller handle this error appropriately
+            # In some cases we want to see the error, in others we want to fall back
+            logger.debug(f"Exception details: {type(e).__name__}: {e}")
+            return None
     
     def _get_model_prompting_guide(self, model: str) -> str:
         """Get model-specific prompting guide."""
@@ -775,40 +814,68 @@ General Best Practices:
     ) -> str:
         """Build prompt for generating trace-based hypothesis."""
         return f"""
-You are an expert prompt engineer tasked with rewriting prompts to fix AI agent failures.
-
 ## DIAGNOSIS
 Root Cause: {diagnosis.root_cause}
 Failure Type: {diagnosis.failure_type.value}
 Evidence: {diagnosis.evidence}
 Confidence: {diagnosis.confidence.value}
 
-## ORIGINAL PROMPTS ({len(original_prompts)} total)
-{chr(10).join([f"---PROMPT {i}---\n{p}\n" for i, p in enumerate(original_prompts[:10])])}
+## SYSTEM PROMPTS ({len(original_prompts)} total)
+{chr(10).join([f"{p}\n" for p in original_prompts[:10]])}
 
 ## MODEL-SPECIFIC GUIDE
 {model_guide}
 
 ## BEST PRACTICES
 {chr(10).join([f"- {bp.get('title', '')}: {bp.get('description', '')}" for bp in best_practices[:5]])}
-
-## TASK
-Rewrite the original prompt to fix the identified issue. Your rewritten prompt should:
-1. Address the specific failure identified in the diagnosis
-2. Apply the model-specific best practices
-3. Maintain the original intent and functionality
-4. Be complete and ready to use (not a patch or diff)
-
-## OUTPUT FORMAT
-Provide ONLY the complete rewritten prompt. Do not include explanations, metadata, or comments.
-Start your response with the prompt directly.
 """
     
     def _parse_trace_based_response(self, response: str) -> Optional[str]:
         """Parse response from trace-based hypothesis generation."""
-        # For now, return the response directly as it should be the complete prompt
-        # Future enhancement: Add validation and cleaning logic
-        return response.strip() if response and response.strip() else None
+        if not response or not response.strip():
+            return None
+            
+        # Clean up the response
+        cleaned = response.strip()
+        
+        # Remove markdown code blocks if GPT-5 added them
+        if cleaned.startswith('```'):
+            lines = cleaned.split('\n')
+            # Find the first non-code-block line
+            start_idx = 1
+            for i, line in enumerate(lines[1:], 1):
+                if not line.strip().startswith('MODIFYING:') and not line.strip().startswith('SKIPPING:'):
+                    start_idx = i
+                    break
+            
+            # Find the closing ``` and remove it
+            end_idx = len(lines)
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip() == '```':
+                    end_idx = i
+                    break
+            
+            # Extract just the prompt content
+            cleaned = '\n'.join(lines[start_idx:end_idx]).strip()
+        
+        # Remove any MODIFYING/SKIPPING headers that GPT-5 might have included
+        lines = cleaned.split('\n')
+        prompt_lines = []
+        skip_until_content = False
+        
+        for line in lines:
+            if line.strip().startswith('MODIFYING:') or line.strip().startswith('REASON:') or line.strip().startswith('LENGTH:'):
+                skip_until_content = True
+                continue
+            elif skip_until_content and line.strip() == '':
+                continue
+            elif skip_until_content and line.strip():
+                skip_until_content = False
+                prompt_lines.append(line)
+            elif not skip_until_content:
+                prompt_lines.append(line)
+        
+        return '\n'.join(prompt_lines).strip() if prompt_lines else None
     
     def _create_generation_metadata(self, diagnosis: Diagnosis) -> Dict[str, Any]:
         """Create metadata for reproducible hypothesis generation."""
@@ -1075,14 +1142,43 @@ Return rankings as JSON array:
 
 Order from most to least likely to succeed."""
 
-TRACE_BASED_HYPOTHESIS_SYSTEM_PROMPT = """You are an expert prompt engineer with deep knowledge of AI model behavior and prompt optimization.
+TRACE_BASED_HYPOTHESIS_SYSTEM_PROMPT = """You are an expert prompt engineer specializing in fixing AI agent failures through system prompt optimization.
 
-Your expertise includes:
-- Analyzing AI agent failures and identifying root causes in prompts
-- Model-specific prompt engineering (GPT, Claude, etc.)
-- Best practices for clear, effective instruction writing
-- Prompt optimization for specific use cases and behaviors
+## CONTEXT
+You will receive multiple SYSTEM prompts from an AI agent trace:
+- Main orchestrator system prompt (controls overall agent behavior)
+- Sub-agent system prompts (control specific tool/function behaviors)
 
-You specialize in rewriting prompts to fix specific issues while maintaining the original intent and functionality. 
+## REASONING REQUIREMENTS
+For EACH system prompt you analyze:
+1. First state whether it needs modification (YES/NO)
+2. If YES, explain WHY this prompt contributes to the failure (2-3 sentences)
+3. Identify SPECIFIC sections/instructions causing issues
+4. Explain how your changes will fix the problem
 
-Your responses should be complete, production-ready prompts that directly address the identified failures."""
+## CRITICAL MODIFICATION CONSTRAINTS
+- STRICT LENGTH LIMIT: Modified prompts MUST stay within 20% of original length (±20% maximum)
+- If original is 100 characters, modified must be 80-120 characters
+- If you cannot fix within length limit, make MINIMAL targeted changes only
+- Make surgical, targeted fixes - not complete rewrites
+- Preserve original structure, formatting, and style
+- Focus only on fixing the diagnosed failure
+
+## OUTPUT FORMAT
+For each system prompt:
+
+If modifying:
+```
+MODIFYING: [prompt run name]
+REASON: [2-3 sentences explaining why this needs changes]
+LENGTH: Original [X] chars → Modified [Y] chars ([Z]% change)
+
+[Complete modified prompt here]
+```
+
+If not modifying:
+```
+SKIPPING: [prompt run name] - [1 sentence reason why no changes needed]
+```
+
+Remember: You may modify multiple system prompts if the failure spans across them."""

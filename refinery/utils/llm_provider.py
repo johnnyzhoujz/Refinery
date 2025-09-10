@@ -51,12 +51,13 @@ class ConfigurableLLMProvider(LLMProvider):
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> str:
         """Get a completion from the LLM."""
         try:
             if self.config.llm_provider in ["openai", "azure_openai"]:
                 return await self._openai_complete(
-                    prompt, system_prompt, temperature, max_tokens
+                    prompt, system_prompt, temperature, max_tokens, reasoning_effort
                 )
             elif self.config.llm_provider == "anthropic":
                 return await self._anthropic_complete(
@@ -96,6 +97,7 @@ class ConfigurableLLMProvider(LLMProvider):
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> str:
         """OpenAI-specific completion."""
         messages = []
@@ -103,13 +105,28 @@ class ConfigurableLLMProvider(LLMProvider):
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = await self._client.chat.completions.create(
-            model=self._model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content
+        kwargs = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+            
+        # Add reasoning_effort for GPT-5 models
+        if "gpt-5" in self._model.lower() and reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+
+        # Add 2-minute timeout protection
+        try:
+            response = await asyncio.wait_for(
+                self._client.chat.completions.create(**kwargs),
+                timeout=120.0  # 2 minute timeout
+            )
+            return response.choices[0].message.content
+        except asyncio.TimeoutError:
+            logger.error(f"GPT-5 request timed out after 2 minutes")
+            raise Exception("Request timed out after 2 minutes - prompt may be too long")
 
     async def _anthropic_complete(
         self,
