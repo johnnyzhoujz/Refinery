@@ -68,7 +68,7 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
 
     def _increase_max_tokens(self, current: int) -> int:
         """Bump max tokens with a safety cap to recover from truncation."""
-        return 16000
+        return 64000  # GPT-5 supports up to 128k output tokens; use 64k for hypothesis generation with complex traces
 
     def _load_original_file(self, file_path: str) -> str:
         """Read original file contents when available on disk."""

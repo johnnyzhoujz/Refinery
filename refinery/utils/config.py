@@ -95,8 +95,8 @@ class RefineryConfig:
     hypothesis_llm_provider: str = "openai"
     hypothesis_model: str = "gpt-5"  # GPT-5 exists as of Sept 2025
     hypothesis_temperature: float = 0.0  # Deterministic generation
-    hypothesis_max_tokens: int = 4000
-    hypothesis_reasoning_effort: str = "low"  # Use "low" to avoid GPT-5 large context bug (Aug 2025)
+    hypothesis_max_tokens: int = 16000  # Match trace analysis token limits for GPT-5
+    hypothesis_reasoning_effort: str = "medium"  # Use "medium" for better quality with fewer retries
 
     # Analysis determinism settings
     analysis_seed: Optional[int] = None
@@ -131,8 +131,8 @@ class RefineryConfig:
             hypothesis_llm_provider=os.getenv("HYPOTHESIS_LLM_PROVIDER", "openai"),
             hypothesis_model=os.getenv("HYPOTHESIS_MODEL", "gpt-5"),
             hypothesis_temperature=float(os.getenv("HYPOTHESIS_TEMPERATURE", "0.0")),
-            hypothesis_max_tokens=int(os.getenv("HYPOTHESIS_MAX_TOKENS", "4000")),
-            hypothesis_reasoning_effort=os.getenv("HYPOTHESIS_REASONING_EFFORT", "low"),
+            hypothesis_max_tokens=int(os.getenv("HYPOTHESIS_MAX_TOKENS", "16000")),
+            hypothesis_reasoning_effort=os.getenv("HYPOTHESIS_REASONING_EFFORT", "medium"),
             analysis_seed=int(os.getenv("ANALYSIS_SEED")) if os.getenv("ANALYSIS_SEED") else None,
             max_file_size_kb=int(os.getenv("MAX_FILE_SIZE_KB", "1000")),
             max_changes_per_hypothesis=int(os.getenv("MAX_CHANGES_PER_HYPOTHESIS", "10")),
