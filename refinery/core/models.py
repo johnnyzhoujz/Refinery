@@ -125,6 +125,7 @@ class TraceAnalysis:
     data_transformations: List[Dict[str, Any]]
     error_propagation_path: Optional[List[str]] = None
     identified_issues: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -134,6 +135,7 @@ class GapAnalysis:
     missing_context: List[str]
     incorrect_assumptions: List[str]
     suggested_focus_areas: List[str]
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -149,6 +151,7 @@ class Diagnosis:
     remediations: List[Dict[str, Any]] = field(default_factory=list)
     next_actions: List[Dict[str, Any]] = field(default_factory=list)
     top_findings: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

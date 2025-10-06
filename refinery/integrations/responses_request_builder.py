@@ -18,6 +18,7 @@ def build_responses_body(
     max_output_tokens: int = 1000,
     temperature: float = 0.2,
     reasoning_effort: Optional[str] = None,
+    seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Build a complete request body for OpenAI Responses API.
@@ -73,14 +74,21 @@ def build_responses_body(
                 "strict": True,
                 "schema": json_schema_obj  # MUST be {"type": "object", ...}
             }
-        },
-        "temperature": temperature,
-        "max_output_tokens": max_output_tokens
+        }
     }
+
+    if temperature is not None and _supports_temperature(model):
+        body["temperature"] = temperature
     
-    # Add reasoning_effort for GPT-5 models
-    if "gpt-5" in model.lower() and reasoning_effort:
-        body["reasoning_effort"] = reasoning_effort
+    # Add reasoning configuration when provided
+    if reasoning_effort and _supports_reasoning(model):
+        body["reasoning"] = {"effort": reasoning_effort}
+
+    if max_output_tokens is not None and _supports_max_output_tokens(model):
+        body["max_output_tokens"] = max_output_tokens
+
+    if seed is not None and _supports_seed(model):
+        body["seed"] = seed
     
     return body
 
@@ -93,10 +101,12 @@ def build_responses_body_no_tools(
     max_output_tokens: int = 1000,
     temperature: float = 0.2,
     reasoning_effort: Optional[str] = None,
+    seed: Optional[int] = None,
+    strict: bool = True,
 ) -> Dict[str, Any]:
     """
     Build a request body without file_search tools (for Stage 4 synthesis).
-    
+
     Args:
         model: Model to use (e.g., "gpt-4o")
         system_text: System prompt
@@ -105,15 +115,16 @@ def build_responses_body_no_tools(
         max_output_tokens: Max tokens in response
         temperature: Model temperature
         reasoning_effort: Reasoning effort for GPT-5 models (minimal, low, medium, high)
-    
+        strict: Enable strict JSON schema validation (default True, disable to avoid GPT-5 bugs)
+
     Returns:
         Complete request body for /v1/responses endpoint without tools
     """
-    
+
     # Validate schema has root type object
     if not json_schema_obj.get("type") == "object":
         raise ValueError("Schema must have root type: 'object'")
-    
+
     body = {
         "model": model,
         "input": [
@@ -136,19 +147,46 @@ def build_responses_body_no_tools(
             "format": {
                 "type": "json_schema",
                 "name": "stage_output",
-                "strict": True,
+                "strict": strict,
                 "schema": json_schema_obj
             }
-        },
-        "temperature": temperature,
-        "max_output_tokens": max_output_tokens
+        }
     }
+
+    if temperature is not None and _supports_temperature(model):
+        body["temperature"] = temperature
     
-    # Add reasoning_effort for GPT-5 models
-    if "gpt-5" in model.lower() and reasoning_effort:
-        body["reasoning_effort"] = reasoning_effort
-    
+    # Add reasoning configuration when provided
+    if reasoning_effort and _supports_reasoning(model):
+        body["reasoning"] = {"effort": reasoning_effort}
+
+    if max_output_tokens is not None and _supports_max_output_tokens(model):
+        body["max_output_tokens"] = max_output_tokens
+
+    if seed is not None and _supports_seed(model):
+        body["seed"] = seed
+
     return body
+
+
+def _supports_reasoning(model: str) -> bool:
+    """Return True if the model supports reasoning configuration."""
+    return "gpt-5" in model.lower()
+
+
+def _supports_temperature(model: str) -> bool:
+    """Return True if the model supports temperature parameter."""
+    return "gpt-5" not in model.lower()
+
+
+def _supports_max_output_tokens(model: str) -> bool:
+    """Return True if the model accepts max_output_tokens."""
+    return True
+
+
+def _supports_seed(model: str) -> bool:
+    """Return True if the model accepts deterministic seed parameter."""
+    return "gpt-5" not in model.lower()
 
 
 def build_canary_test_body() -> Dict[str, Any]:

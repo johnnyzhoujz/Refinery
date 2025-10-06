@@ -1,21 +1,37 @@
+import json
 import streamlit as st
 import os
-import asyncio
 import time
 from pathlib import Path
 from refinery.core.orchestrator import create_orchestrator
 from refinery.core.context import RefineryContext
 from refinery.experiments.customer_experiment_manager import CustomerExperimentManager
-from refinery.agents.hypothesis_generator import AdvancedHypothesisGenerator
 from refinery.ui.utils import run_async, load_context_json, load_project_context_for_trace
 
 st.set_page_config(page_title="Refinery Trace Analysis", page_icon="🔬")
 st.title("🔬 Refinery Trace Analysis")
 
 # Initialize cached managers (P0 CRITICAL)
+if "progress_events" not in st.session_state:
+    st.session_state.progress_events = []
+
+
+def _streamlit_progress_callback(event_type: str, payload: dict) -> None:
+    # Append progress events to session state for display
+    st.session_state.progress_events.append(
+        {
+            "event": event_type,
+            "payload": payload,
+            "timestamp": time.time(),
+        }
+    )
+
+
 if "orchestrator" not in st.session_state:
     try:
-        st.session_state.orchestrator = run_async(create_orchestrator(os.getcwd()))
+        st.session_state.orchestrator = run_async(
+            create_orchestrator(os.getcwd(), progress_callback=_streamlit_progress_callback)
+        )
     except Exception as e:
         st.error(f"Failed to initialize orchestrator: {e}")
         st.stop()
@@ -23,10 +39,6 @@ if "orchestrator" not in st.session_state:
 if "experiment_manager" not in st.session_state:
     # Use CustomerExperimentManager for customer versions (P0 CRITICAL)
     st.session_state.experiment_manager = CustomerExperimentManager(Path(os.getcwd()))
-
-if "hypothesis_generator" not in st.session_state:
-    # Create hypothesis generator for trace-based generation
-    st.session_state.hypothesis_generator = AdvancedHypothesisGenerator()
 
 # Initialize conversation state
 if "conversation_state" not in st.session_state:
@@ -64,6 +76,8 @@ if st.session_state.conversation_state == "waiting_for_trace":
     input_placeholder = "What's the trace ID?"
 elif st.session_state.conversation_state == "waiting_for_expected":
     input_placeholder = "What should have happened instead?"
+elif st.session_state.conversation_state == "analysis_error":
+    input_placeholder = "Enter your message..."
 else:
     input_placeholder = "Enter your message..."
 
@@ -88,10 +102,15 @@ if prompt := st.chat_input(input_placeholder):
         st.session_state.conversation_state = "analyzing"
         st.rerun()  # Display the user's message before starting analysis
 
+    elif st.session_state.conversation_state == "analysis_error":
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Keep state but allow user to type follow-up; no automatic restart
+
 # Run analysis when in analyzing state
 if st.session_state.conversation_state == "analyzing" and not st.session_state.get("analysis"):
     with st.chat_message("assistant"):
         try:
+            st.session_state.progress_events = []
             # Stream progress messages (separate from results - P0 CRITICAL)
             def progress_stream():
                 yield "🔍 Fetching trace from LangSmith...\n"
@@ -107,8 +126,10 @@ if st.session_state.conversation_state == "analyzing" and not st.session_state.g
             
             # Run actual analysis (capture result separately - P0 CRITICAL)
             with st.spinner("Processing..."):
-                # First fetch the trace object for hypothesis generation
-                trace = run_async(st.session_state.orchestrator.langsmith_client.fetch_trace(st.session_state.user_trace_id))
+                # Fetch/cached trace once via orchestrator
+                trace = run_async(
+                    st.session_state.orchestrator.ensure_trace(st.session_state.user_trace_id)
+                )
                 
                 # Extract and store prompts from trace automatically
                 project_name = f"ui-{st.session_state.user_trace_id[:8]}"
@@ -146,8 +167,27 @@ if st.session_state.conversation_state == "analyzing" and not st.session_state.g
             
         except Exception as e:
             st.error(f"Analysis failed: {str(e)}")
-            if st.button("Retry"):
+            st.session_state.analysis = None
+            st.session_state.analysis_error = str(e)
+            st.session_state.conversation_state = "analysis_error"
+            st.session_state.progress_events = []
+            st.rerun()
+
+# Show error state controls
+if st.session_state.conversation_state == "analysis_error":
+    with st.chat_message("assistant"):
+        error_msg = st.session_state.get("analysis_error", "Unknown error")
+        st.error(f"Last analysis attempt failed: {error_msg}")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Retry analysis", use_container_width=True):
+                st.session_state.conversation_state = "analyzing"
+                st.session_state.progress_events = []
+                st.rerun()
+        with col2:
+            if st.button("Edit inputs", use_container_width=True):
                 st.session_state.conversation_state = "waiting_for_expected"
+                st.session_state.analysis_error = None
                 st.rerun()
 
 # Display analysis results if available (button placement based on state - P0 CRITICAL)
@@ -166,11 +206,20 @@ if st.session_state.get("analysis"):
             st.json(str(result))
     except Exception:
         st.text(str(result))
-    
+
+    if st.session_state.progress_events:
+        st.markdown("### 📡 Live Progress")
+        for event in st.session_state.progress_events[-50:]:
+            timestamp = time.strftime("%H:%M:%S", time.localtime(event.get("timestamp", time.time())))
+            st.markdown(
+                f"- `{timestamp}` **{event['event']}** → {json.dumps(event['payload'], default=str)[:2000]}"
+            )
+
     # Hypothesis generation button (rendered based on state - P0 CRITICAL)
     if st.button("🚀 Generate Hypotheses with GPT-5", use_container_width=True):
         with st.chat_message("assistant"):
             try:
+                st.session_state.progress_events = []
                 # Stream hypothesis generation
                 def hypothesis_stream():
                     import time
@@ -194,12 +243,14 @@ if st.session_state.get("analysis"):
                 
                 # Generate hypothesis using the working approach from test file
                 with st.spinner("Generating..."):
+                    trace = run_async(
+                        st.session_state.orchestrator.ensure_trace(st.session_state.trace_id)
+                    )
                     hypotheses = run_async(
-                        st.session_state.hypothesis_generator.generate_hypotheses(
+                        st.session_state.orchestrator.generate_hypotheses_from_trace(
                             diagnosis=st.session_state.analysis.diagnosis,
-                            trace=st.session_state.trace,  # Use the stored trace object
-                            code_context=None,
-                            best_practices=None
+                            trace=trace,
+                            max_hypotheses=1,
                         )
                     )
                 

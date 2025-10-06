@@ -108,14 +108,19 @@ class ConfigurableLLMProvider(LLMProvider):
         kwargs = {
             "model": self._model,
             "messages": messages,
-            "temperature": temperature,
         }
+        is_gpt5 = "gpt-5" in (self._model or "").lower()
+        if not is_gpt5:
+            kwargs["temperature"] = temperature
         if max_tokens:
-            kwargs["max_tokens"] = max_tokens
-            
+            if is_gpt5:
+                kwargs["max_completion_tokens"] = max_tokens
+            else:
+                kwargs["max_tokens"] = max_tokens
+
         # Add reasoning_effort for GPT-5 models
-        if "gpt-5" in self._model.lower() and reasoning_effort:
-            kwargs["reasoning_effort"] = reasoning_effort
+        if reasoning_effort and is_gpt5:
+            kwargs["reasoning"] = {"effort": reasoning_effort}
 
         # Add 2-minute timeout protection
         try:

@@ -331,15 +331,17 @@ GROUP: {group_id}
 
     async def _upload_file_content(self, filename: str, content: str) -> Any:
         """Upload file content to OpenAI Files API."""
-        
+
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
             f.write(content)
             f.flush()
-            
-            # Upload to Files API
+
+            # Upload to Files API with custom filename
+            # Use tuple (filename, file_obj) to preserve the intended filename
+            # instead of the temp file path
             with open(f.name, 'rb') as file_obj:
                 file_response = self.client.files.create(
-                    file=file_obj,
+                    file=(filename, file_obj),
                     purpose="assistants"
                 )
         

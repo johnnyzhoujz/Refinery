@@ -60,6 +60,196 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
     async def run_analysis():
         codebase_abs = os.path.abspath(codebase)
         context_manager = RefineryContext(codebase_abs)
+
+        def handle_progress(event_type: str, payload: dict) -> None:
+            """Stream analysis milestones to the console for better UX."""
+
+            try:
+                if event_type == "analysis_started":
+                    console.log(
+                        f"[blue]Starting analysis for trace {payload.get('trace_id', '')}[/blue]"
+                    )
+                elif event_type == "stage1_planning":
+                    mode = "chunked" if payload.get("chunking") else "single-call"
+                    console.log(
+                        f"[cyan]Stage 1 planning: {payload.get('total_runs', '?')} runs → {mode}[/cyan]"
+                    )
+                elif event_type == "vector_store_upload_start":
+                    console.log(
+                        f"[cyan]Staging files for vector store ({payload.get('mode', 'unknown')} mode): "
+                        f"{payload.get('total_files', 0)} files (batch size {payload.get('batch_size', '?')}).[/cyan]"
+                    )
+                elif event_type == "vector_store_batch_start":
+                    console.log(
+                        f"[white]Uploading batch {payload.get('batch_number')}/{payload.get('total_batches')} "
+                        f"to vector store…[/white]"
+                    )
+                elif event_type == "vector_store_batch_complete":
+                    console.log(
+                        f"[green]Uploaded batch {payload.get('batch_number')}/{payload.get('total_batches')} "
+                        f"({payload.get('completed_files', 0)} files, {payload.get('duration_seconds', 0)}s).[/green]"
+                    )
+                elif event_type == "vector_store_batch_failed":
+                    console.log(
+                        f"[red]Vector store batch {payload.get('batch_number')} failed ({payload.get('failed_files', 0)} files).[/red]"
+                    )
+                elif event_type == "vector_store_upload_complete":
+                    console.log(
+                        f"[green]Vector store staging complete in {payload.get('duration_seconds', 0)}s.[/green]"
+                    )
+                elif event_type == "stage1_chunked_enqueued":
+                    console.log(
+                        f"[cyan]Stage 1 chunked: {payload.get('total_groups')} groups, group size {payload.get('group_size')}[/cyan]"
+                    )
+                elif event_type == "stage1_single_call_enqueued":
+                    console.log("[cyan]Stage 1 single-call mode queued.[/cyan]")
+                elif event_type == "stage1_group_start":
+                    console.log(
+                        f"[white]Stage 1 chunk {payload.get('group_index')}/{payload.get('total_groups')} started[/white]"
+                    )
+                elif event_type == "stage1_group_retry":
+                    attempt = payload.get("attempt") or 0
+                    max_attempts = payload.get("max_attempts") or (attempt + 1)
+                    next_attempt = min(attempt + 1, max_attempts)
+                    error_summary = payload.get("error")
+                    if error_summary:
+                        error_summary = error_summary.strip()
+                        if len(error_summary) > 120:
+                            error_summary = error_summary[:117] + "..."
+                    console.log(
+                        f"[yellow]Stage 1 chunk {payload.get('group_index')} retrying in {payload.get('backoff_seconds')}s "
+                        f"(attempt {next_attempt}/{max_attempts})"
+                        + (f" – {error_summary}" if error_summary else "")
+                        + "[/yellow]"
+                    )
+                elif event_type == "stage1_group_rate_limited":
+                    console.log(
+                        f"[yellow]Stage 1 chunk {payload.get('group_index')} waiting {payload.get('wait_seconds')}s for TPM[/yellow]"
+                    )
+                elif event_type == "stage1_group_complete":
+                    console.log(
+                        f"[green]Stage 1 chunk {payload.get('group_index')} completed (attempts: {payload.get('attempts')})[/green]"
+                    )
+                elif event_type == "stage1_group_failed":
+                    console.log(
+                        f"[red]Stage 1 chunk {payload.get('group_index')} exhausted retries; continuing with placeholders ({payload.get('error')})[/red]"
+                    )
+                elif event_type == "stage1_group_connection_failed":
+                    console.log(
+                        f"[red]Stage 1 chunk {payload.get('group_index')} hit repeated connection failures: {payload.get('error')[:160]}[/red]"
+                    )
+                elif event_type == "stage1_group_sleep":
+                    console.log(
+                        f"[white]Stage 1 pausing {payload.get('sleep_seconds')}s before next chunk (completed {payload.get('completed_groups')} groups).[/white]"
+                    )
+                elif event_type == "stage1_chunked_complete":
+                    console.log(
+                        f"[green]Stage 1 chunked run complete ({payload.get('merged_timeline_items', 0)} timeline items).[/green]"
+                    )
+                elif event_type == "stage1_interactive_complete":
+                    console.log(
+                        f"[green]Stage 1 completed with {payload.get('timeline_items', 0)} timeline items.[/green]"
+                    )
+                elif event_type == "stage2_start":
+                    console.log("[cyan]Stage 2 (Gap Analysis) started.[/cyan]")
+                elif event_type == "stage2_retry":
+                    stage2_error = payload.get("error")
+                    note = ""
+                    if stage2_error:
+                        stage2_error = stage2_error.strip()
+                        if len(stage2_error) > 120:
+                            stage2_error = stage2_error[:117] + "..."
+                        note = f" – {stage2_error}"
+                    console.log(
+                        f"[yellow]Stage 2 retrying in {payload.get('backoff_seconds')}s (attempt {payload.get('attempt') + 1}).{note}[/yellow]"
+                    )
+                elif event_type == "stage2_failed":
+                    console.log(
+                        f"[red]Stage 2 failed: {payload.get('error')}[/red]"
+                    )
+                elif event_type == "stage2_complete":
+                    console.log("[green]Stage 2 complete.[/green]")
+                elif event_type == "stage3_start":
+                    console.log("[cyan]Stage 3 (Diagnosis) started.[/cyan]")
+                elif event_type == "stage3_retry":
+                    stage3_error = payload.get("error")
+                    note = ""
+                    if stage3_error:
+                        stage3_error = stage3_error.strip()
+                        if len(stage3_error) > 120:
+                            stage3_error = stage3_error[:117] + "..."
+                        note = f" – {stage3_error}"
+                    console.log(
+                        f"[yellow]Stage 3 retrying in {payload.get('backoff_seconds')}s (attempt {payload.get('attempt') + 1}).{note}[/yellow]"
+                    )
+                elif event_type == "stage3_failed":
+                    console.log(
+                        f"[red]Stage 3 failed: {payload.get('error')}[/red]"
+                    )
+                elif event_type == "stage3_complete":
+                    console.log(
+                        f"[green]Stage 3 complete – root cause: {payload.get('root_cause', 'n/a')}[/green]"
+                    )
+                elif event_type == "stage4_start":
+                    console.log("[cyan]Stage 4 (Synthesis) started.[/cyan]")
+                elif event_type == "stage4_retry":
+                    stage4_error = payload.get("error")
+                    note = ""
+                    if stage4_error:
+                        stage4_error = stage4_error.strip()
+                        if len(stage4_error) > 120:
+                            stage4_error = stage4_error[:117] + "..."
+                        note = f" – {stage4_error}"
+                    console.log(
+                        f"[yellow]Stage 4 retrying in {payload.get('backoff_seconds')}s (attempt {payload.get('attempt') + 1}).{note}[/yellow]"
+                    )
+                elif event_type == "stage4_failed":
+                    console.log(
+                        f"[red]Stage 4 failed: {payload.get('error')}[/red]"
+                    )
+                elif event_type == "stage4_complete":
+                    console.log("[green]Stage 4 complete. Preparing final summary...[/green]")
+                elif event_type == "analysis_completed":
+                    console.log(
+                        f"[green]Analysis finished – failure type: {payload.get('failure_type', 'unknown')}[/green]"
+                    )
+                elif event_type == "hypothesis_best_practices_start":
+                    console.log(
+                        "[cyan]Hypothesis: fetching best practices...[/cyan]"
+                    )
+                elif event_type == "hypothesis_best_practices_complete":
+                    console.log(
+                        f"[green]Hypothesis best practices ready ({payload.get('count', 0)} matches, {payload.get('elapsed_s', 0)}s).[/green]"
+                    )
+                elif event_type == "hypothesis_generation_start":
+                    console.log(
+                        f"[cyan]Hypothesis generation ({payload.get('stage', 'unknown')}) started.[/cyan]"
+                    )
+                elif event_type == "hypothesis_generation_chunk_progress":
+                    console.log(
+                        f"[white]Hypothesis generation progress ({payload.get('stage', 'unknown')}): {int(payload.get('progress', 0)*100)}%.[/white]"
+                    )
+                elif event_type == "hypothesis_generation_complete":
+                    console.log(
+                        f"[green]Hypothesis generation ({payload.get('stage', 'unknown')}) complete – {payload.get('count', 0)} candidates in {payload.get('elapsed_s', 0)}s.[/green]"
+                    )
+                elif event_type == "hypothesis_rank_start":
+                    console.log(
+                        "[cyan]Ranking hypotheses...[/cyan]"
+                    )
+                elif event_type == "hypothesis_rank_complete":
+                    console.log(
+                        f"[green]Hypothesis ranking complete ({payload.get('elapsed_s', 0)}s).[/green]"
+                    )
+                elif event_type == "hypothesis_failed":
+                    console.log(
+                        f"[red]Hypothesis stage failed ({payload.get('stage', 'unknown')}): {payload.get('error', 'unknown error')}[/red]"
+                    )
+            except Exception:
+                # Progress should never interrupt analysis; log quietly in debug builds
+                if config.debug:
+                    console.log(f"[red]Progress callback error for {event_type}[/red]")
+
         
         # Step 1: Handle context management (same as fix command)
         try:
@@ -99,9 +289,11 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
             # Step 2: Optional - Extract prompts from trace and save them
             if extract_from_trace:
                 console.print("[blue]Extracting prompts from trace...[/blue]")
-                orchestrator = await create_orchestrator(codebase_abs)
-                # Fetch the trace
-                trace = await orchestrator.langsmith_client.fetch_trace(trace_id)
+                orchestrator = await create_orchestrator(
+                    codebase_abs, progress_callback=handle_progress
+                )
+                # Fetch the trace (ensures single LangSmith call per run)
+                trace = await orchestrator.ensure_trace(trace_id)
                 # Extract prompts from the trace
                 extracted = orchestrator.langsmith_client.extract_prompts_from_trace(trace)
                 # Store extracted prompts as files
@@ -117,33 +309,25 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
                           len(project_context.get("eval_files", [])))
             
             if total_files == 0:
-                console.print("[red]No files specified for analysis![/red]")
-                console.print("\nOptions:")
-                console.print("1. Specify files manually:")
-                console.print("   refinery analyze <trace> --project <name> --prompt-files <files> --eval-files <files>")
-                console.print("\n2. Extract from trace:")
-                console.print("   refinery analyze <trace> --project <name> --extract-from-trace")
-                console.print("\n3. Add files to existing project:")
-                console.print("   refinery analyze <trace> --project <name> --add-prompt <file>")
-                return
-            
-            # Show what files we're using
-            if context_exists:
-                console.print(f"[green]Using saved context for '{project}' ({total_files} files)[/green]")
+                console.print("[yellow]No local context files configured; defaulting to LangSmith prompts/evals.[/yellow]")
             else:
-                console.print(f"[yellow]Created new context for '{project}' ({total_files} files)[/yellow]")
-            
-            if config.debug:
-                console.print(f"Prompt files: {project_context.get('prompt_files', [])}")
-                console.print(f"Eval files: {project_context.get('eval_files', [])}")
+                # Show what files we're using
+                if context_exists:
+                    console.print(f"[green]Using saved context for '{project}' ({total_files} files)[/green]")
+                else:
+                    console.print(f"[yellow]Created new context for '{project}' ({total_files} files)[/yellow]")
+
+                if config.debug:
+                    console.print(f"Prompt files: {project_context.get('prompt_files', [])}")
+                    console.print(f"Eval files: {project_context.get('eval_files', [])}")
                 
         except Exception as e:
             console.print(f"[red]Context management error: {e}[/red]")
             return
         
         # Step 4: Read the actual file contents from saved context
-        prompt_contents = {}
-        eval_contents = {}
+        prompt_contents = None
+        eval_contents = None
         
         # Get absolute file paths for reading
         file_paths = context_manager.get_file_paths(project)
@@ -151,6 +335,7 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
         # Read prompt files
         if file_paths["prompt_files"]:
             console.print("[blue]Reading prompt files from context...[/blue]")
+            prompt_contents = {}
             for file_path in file_paths["prompt_files"]:
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
@@ -162,6 +347,7 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
         # Read eval files
         if file_paths["eval_files"]:
             console.print("[blue]Reading eval files from context...[/blue]")
+            eval_contents = {}
             for file_path in file_paths["eval_files"]:
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
@@ -173,11 +359,12 @@ def analyze(trace_id: str, project: str, expected: str, context: str, codebase: 
         # Step 5: Initialize orchestrator and run analysis
         with console.status("[bold blue]Initializing Refinery..."):
             if not extract_from_trace:  # Only create orchestrator if not already created
-                orchestrator = await create_orchestrator(codebase_abs)
-        
+                orchestrator = await create_orchestrator(
+                    codebase_abs, progress_callback=handle_progress
+                )
+
         console.print(f"[blue]Analyzing trace {trace_id} from project {project}...[/blue]")
-        console.print(f"[dim]Using {len(prompt_contents)} prompt files and {len(eval_contents)} eval files[/dim]")
-        
+
         try:
             with console.status("[bold blue]Fetching trace and analyzing failure..."):
                 complete_analysis = await orchestrator.analyze_failure(
@@ -350,15 +537,16 @@ def fix(trace_id: str, project: str, expected: str, context: str, codebase: str,
             
             # Step 3: Analyze failure
             with console.status("[bold blue]Analyzing failure..."):
-                diagnosis = await orchestrator.analyze_failure(
+                analysis = await orchestrator.analyze_failure(
                     trace_id=trace_id,
                     project=project,
                     expected_behavior=expected,
                     business_context=context
                 )
-            
+
+            diagnosis = analysis.diagnosis
             console.print(f"[green]✓[/green] Diagnosed: {diagnosis.failure_type.value}")
-            
+
             # Step 4: Generate hypotheses
             with console.status("[bold blue]Generating fix hypotheses..."):
                 hypotheses = await orchestrator.generate_fixes(diagnosis)

@@ -159,7 +159,8 @@ class CustomerExperimentManager:
         # Calculate file hashes for integrity
         files_metadata = []
         for change in hypothesis.proposed_changes:
-            self.validate_change_path(change.file_path)  # Safety check
+            # Safety check - allow prompts, config, orchestration, tests, and evals
+            self.validate_change_path(change.file_path, allowed_roots=("prompts/", "config/", "orchestration/", "tests/", "evals/"))  # Safety check
             
             # Write file content
             target_path = version_dir / change.file_path

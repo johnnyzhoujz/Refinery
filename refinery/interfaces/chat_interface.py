@@ -335,9 +335,10 @@ Let's get started!
         
         # Show before/after for each change
         for change in hypothesis.proposed_changes:
-            before_text = change.original_content[:500] + "..." if len(change.original_content) > 500 else change.original_content
-            after_text = change.new_content[:500] + "..." if len(change.new_content) > 500 else change.new_content
-            
+            # Show full content (no truncation) - users need to see complete prompts to make informed decisions
+            before_text = change.original_content
+            after_text = change.new_content
+
             comparison_text = f"## Before (Current)\n```\n{before_text}\n```\n\n"
             comparison_text += f"## After (Proposed)\n```\n{after_text}\n```"
             

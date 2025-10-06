@@ -20,16 +20,20 @@ class ChunkedAnalysisConfig:
     # Token management
     max_num_results_stage1: int = 2  # File search results for Stage 1 chunks
     max_num_results_other: int = 3  # File search results for Stages 2-3
-    max_output_tokens_stage1: int = 900  # Output tokens for Stage 1 chunks
-    max_output_tokens_other: int = 1000  # Output tokens for Stages 2-3
+    max_output_tokens_stage1: int = 16000  # Output tokens for Stage 1 chunks (GPT-5 reasoning needs 16k for complex analysis)
+    max_output_tokens_other: int = 8000   # Output tokens for Stages 2-3 (GPT-5 reasoning needs 8k+)
     
     # Rate limiting
-    inter_group_sleep_s: int = 10  # Seconds between group calls
+    inter_group_sleep_s: int = 6  # Seconds between group calls (tuneable)
+    background_timeout_s: int = 900  # Minimum background polling timeout per chunk (increased for GPT-5 reasoning)
     tpm_limit: int = 30000  # TPM limit for rate limiting
     tpm_buffer: int = 2000  # Buffer below TPM limit
     
     # Model settings
     temperature: float = 0.2  # Low temperature for consistency
+
+    # Reasoning model adjustments
+    reasoning_group_size_cap: int = 1  # Max runs per chunk when using reasoning models
     
     # Feature flags
     disable_chunking: bool = False  # Emergency disable flag
@@ -42,12 +46,14 @@ class ChunkedAnalysisConfig:
             chunking_threshold=int(os.getenv("CHUNKING_THRESHOLD", "20")),
             max_num_results_stage1=int(os.getenv("MAX_NUM_RESULTS_STAGE1", "2")),
             max_num_results_other=int(os.getenv("MAX_NUM_RESULTS_OTHER", "3")),
-            max_output_tokens_stage1=int(os.getenv("MAX_OUTPUT_TOKENS_STAGE1", "900")),
-            max_output_tokens_other=int(os.getenv("MAX_OUTPUT_TOKENS_OTHER", "1000")),
-            inter_group_sleep_s=int(os.getenv("INTER_GROUP_SLEEP_S", "10")),
+            max_output_tokens_stage1=int(os.getenv("MAX_OUTPUT_TOKENS_STAGE1", "16000")),
+            max_output_tokens_other=int(os.getenv("MAX_OUTPUT_TOKENS_OTHER", "8000")),
+            inter_group_sleep_s=int(os.getenv("INTER_GROUP_SLEEP_S", "6")),
+            background_timeout_s=int(os.getenv("BACKGROUND_TIMEOUT_S", "900")),
             tpm_limit=int(os.getenv("TPM_LIMIT", "30000")),
             tpm_buffer=int(os.getenv("TPM_BUFFER", "2000")),
             temperature=float(os.getenv("TEMPERATURE", "0.2")),
+            reasoning_group_size_cap=int(os.getenv("REASONING_GROUP_SIZE_CAP", "4")),
             disable_chunking=os.getenv("REFINERY_DISABLE_CHUNKING", "false").lower() == "true"
         )
 
@@ -90,6 +96,10 @@ class RefineryConfig:
     hypothesis_model: str = "gpt-5"  # GPT-5 exists as of Sept 2025
     hypothesis_temperature: float = 0.0  # Deterministic generation
     hypothesis_max_tokens: int = 4000
+    hypothesis_reasoning_effort: str = "low"  # Use "low" to avoid GPT-5 large context bug (Aug 2025)
+
+    # Analysis determinism settings
+    analysis_seed: Optional[int] = None
     
     # Safety settings
     max_file_size_kb: int = 1000
@@ -122,6 +132,8 @@ class RefineryConfig:
             hypothesis_model=os.getenv("HYPOTHESIS_MODEL", "gpt-5"),
             hypothesis_temperature=float(os.getenv("HYPOTHESIS_TEMPERATURE", "0.0")),
             hypothesis_max_tokens=int(os.getenv("HYPOTHESIS_MAX_TOKENS", "4000")),
+            hypothesis_reasoning_effort=os.getenv("HYPOTHESIS_REASONING_EFFORT", "low"),
+            analysis_seed=int(os.getenv("ANALYSIS_SEED")) if os.getenv("ANALYSIS_SEED") else None,
             max_file_size_kb=int(os.getenv("MAX_FILE_SIZE_KB", "1000")),
             max_changes_per_hypothesis=int(os.getenv("MAX_CHANGES_PER_HYPOTHESIS", "10")),
             require_approval_for_changes=os.getenv("REQUIRE_APPROVAL_FOR_CHANGES", "true").lower() == "true",
@@ -161,6 +173,12 @@ class RefineryConfig:
         
         if self.hypothesis_max_tokens < 100 or self.hypothesis_max_tokens > 16000:
             raise ValueError("hypothesis_max_tokens must be between 100 and 16000")
+
+        allowed_efforts = {"minimal", "low", "medium", "high"}
+        if self.hypothesis_reasoning_effort not in allowed_efforts:
+            raise ValueError(
+                f"hypothesis_reasoning_effort must be one of {sorted(allowed_efforts)}"
+            )
 
 
 # Global config instance

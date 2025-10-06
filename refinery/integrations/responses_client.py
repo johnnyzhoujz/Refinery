@@ -8,6 +8,7 @@ and parses the structured JSON output.
 import json
 import asyncio
 import logging
+import time
 from typing import Dict, Any, Optional, Tuple
 import httpx
 
@@ -46,14 +47,15 @@ class ResponsesClient:
             Exception: On API errors or network issues
         """
         url = f"{self.base_url}/v1/responses"
-        
-        async with httpx.AsyncClient() as client:
+
+        # Use extended timeout for GPT-5 reasoning jobs
+        timeout_config = httpx.Timeout(timeout=1200.0, connect=60.0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
             try:
                 response = await client.post(
                     url,
                     headers=self.headers,
-                    json=body,
-                    timeout=300.0  # 5 minute timeout
+                    json=body
                 )
                 
                 response_text = response.text
@@ -68,8 +70,7 @@ class ResponsesClient:
                         response = await client.post(
                             url,
                             headers=self.headers,
-                            json=body,
-                            timeout=300.0
+                            json=body
                         )
                         continue
                     break
@@ -93,40 +94,75 @@ class ResponsesClient:
                 raise Exception("Request timeout after 5 minutes")
             except httpx.RequestError as e:
                 raise Exception(f"Network error: {str(e)}")
+
+    async def retrieve(self, response_id: str) -> Dict[str, Any]:
+        """Retrieve a background Responses job."""
+        url = f"{self.base_url}/v1/responses/{response_id}"
+
+        # Use extended timeout for GPT-5 reasoning jobs
+        timeout_config = httpx.Timeout(timeout=1200.0, connect=60.0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            try:
+                # Increased timeout to 20 minutes for GPT-5 reasoning jobs
+                response = await client.get(url, headers=self.headers)
+            except httpx.TimeoutException:
+                raise Exception("Retrieve request timeout after 20 minutes")
+            except httpx.RequestError as e:
+                raise Exception(f"Network error on retrieve: {str(e)}")
+
+        if response.status_code != 200:
+            raise Exception(
+                f"Retrieve error {response.status_code}: {response.text[:200]}"
+            )
+
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            raise Exception(f"Invalid JSON from retrieve: {response.text[:200]}")
     
     def parse_json_output(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """
         Extract and parse JSON from the Responses API response.
-        
+
         Args:
             response: Raw response from the API
-        
+
         Returns:
             Parsed JSON object from the model's output
-        
+
         Raises:
             Exception: If JSON parsing fails
         """
         try:
+            # DEBUG: Log entry to parser
+            logger.debug(f"[GPT5-DEBUG] parse_json_output called with response keys: {list(response.keys())}")
+
             # First try: Look for output_text field (some SDKs expose this)
             if "output_text" in response:
+                logger.debug(f"[GPT5-DEBUG] Found output_text field")
                 return json.loads(response["output_text"])
             
             # Second try: Extract from output array structure
             if "output" in response and len(response["output"]) > 0:
+                logger.debug(f"[GPT5-DEBUG] Found output array with {len(response['output'])} items")
                 # Find the message output item (skip file_search_call items)
-                for output_item in response["output"]:
+                for idx, output_item in enumerate(response["output"]):
+                    logger.debug(f"[GPT5-DEBUG] Output item {idx}: type={output_item.get('type')}")
                     if output_item.get("type") == "message":
                         output_content = output_item.get("content", [])
-                        
+                        logger.debug(f"[GPT5-DEBUG] Found message with {len(output_content)} content items")
+
                         # Concatenate all output_text content items
                         text_parts = []
                         for item in output_content:
                             if item.get("type") == "output_text":
-                                text_parts.append(item.get("text", ""))
-                        
+                                text = item.get("text", "")
+                                logger.debug(f"[GPT5-DEBUG] Found output_text: {text[:200]}...")
+                                text_parts.append(text)
+
                         if text_parts:
                             full_text = "".join(text_parts)
+                            logger.info(f"[GPT5-DEBUG] Successfully extracted text ({len(full_text)} chars), parsing JSON...")
                             return json.loads(full_text)
             
             # Third try: Look for choices array (chat completions format)
@@ -201,6 +237,36 @@ class ResponsesClient:
             usage_total = None
         
         return json_output, usage_total
+
+    def _build_metadata(
+        self,
+        response: Dict[str, Any],
+        usage_total: Optional[int],
+    ) -> Dict[str, Any]:
+        metadata: Dict[str, Any] = {
+            "response_id": response.get("id"),
+            "status": response.get("status"),
+            "model": response.get("model"),
+            "usage_total_tokens": usage_total,
+            "file_search_calls": [],
+            "retrieved_chunk_ids": [],
+        }
+
+        for item in response.get("output", []):
+            if item.get("type") == "file_search_call":
+                results = item.get("results") or []
+                metadata["file_search_calls"].append(
+                    {
+                        "id": item.get("id"),
+                        "results": results,
+                    }
+                )
+                for result in results:
+                    chunk_id = result.get("chunk_id")
+                    if chunk_id:
+                        metadata["retrieved_chunk_ids"].append(chunk_id)
+
+        return metadata
     
     async def create_with_retry(
         self, 
@@ -239,6 +305,71 @@ class ResponsesClient:
             
             raise
 
+    async def create_background(
+        self,
+        body: Dict[str, Any],
+        poll_interval: float = 5.0,
+        timeout: Optional[float] = None,
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Create a background job and poll until completion."""
+
+        payload = dict(body)
+        payload["background"] = True
+        payload.setdefault("store", True)
+
+        initial = await self.create(payload)
+        status = initial.get("status")
+        response_id = initial.get("id")
+
+        # DEBUG: Log raw response structure for GPT-5 debugging
+        logger.info(f"[GPT5-DEBUG] Initial response status: {status}, id: {response_id}")
+        logger.info(f"[GPT5-DEBUG] Response keys: {list(initial.keys())}")
+
+        if status in {"succeeded", "completed"}:
+            # DEBUG: Log full response structure before parsing
+            logger.info(f"[GPT5-DEBUG] Fast-complete response structure: {json.dumps(initial, indent=2)[:2000]}")
+            json_output, usage_total = self.parse_json_and_usage(initial)
+            logger.info(f"[GPT5-DEBUG] Parsed JSON keys: {list(json_output.keys()) if isinstance(json_output, dict) else type(json_output)}")
+            logger.info(f"[GPT5-DEBUG] Usage: {usage_total} tokens")
+            metadata = self._build_metadata(initial, usage_total)
+            return json_output, metadata
+
+        if not response_id:
+            raise Exception("Background response missing id")
+
+        if status not in {"queued", "in_progress"}:
+            raise Exception(
+                f"Background job failed fast: status={status}, details={initial.get('incomplete_details') or initial.get('error')}"
+            )
+
+        deadline = time.time() + timeout if timeout else None
+
+        while True:
+            if deadline and time.time() > deadline:
+                raise Exception(
+                    f"Background job timed out after {timeout} seconds (id={response_id})"
+                )
+
+            await asyncio.sleep(poll_interval)
+            job = await self.retrieve(response_id)
+            job_status = job.get("status")
+
+            if job_status in {"succeeded", "completed"}:
+                # DEBUG: Log full polled response before parsing
+                logger.info(f"[GPT5-DEBUG] Polled job complete. Response structure: {json.dumps(job, indent=2)[:2000]}")
+                json_output, usage_total = self.parse_json_and_usage(job)
+                logger.info(f"[GPT5-DEBUG] Parsed JSON keys: {list(json_output.keys()) if isinstance(json_output, dict) else type(json_output)}")
+                logger.info(f"[GPT5-DEBUG] Usage: {usage_total} tokens")
+                metadata = self._build_metadata(job, usage_total)
+                return json_output, metadata
+
+            if job_status in {"failed", "cancelled", "incomplete", "requires_action"}:
+                raise Exception(
+                    f"Background job failed: status={job_status}, details={job.get('incomplete_details') or job.get('error')}"
+                )
+
+            # Continue polling while queued or in progress
+
 
 # Module-level convenience functions
 _client: Optional[ResponsesClient] = None
@@ -271,3 +402,19 @@ async def create_with_retry(body: Dict[str, Any]) -> Dict[str, Any]:
     if _client is None:
         raise Exception("Client not initialized. Call init_client() first.")
     return await _client.create_with_retry(body)
+
+async def retrieve(response_id: str) -> Dict[str, Any]:
+    """Retrieve a background job using the module-level client."""
+    if _client is None:
+        raise Exception("Client not initialized. Call init_client() first.")
+    return await _client.retrieve(response_id)
+
+async def create_background(
+    body: Dict[str, Any],
+    poll_interval: float = 5.0,
+    timeout: Optional[float] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Create a background job using the module-level client."""
+    if _client is None:
+        raise Exception("Client not initialized. Call init_client() first.")
+    return await _client.create_background(body, poll_interval=poll_interval, timeout=timeout)

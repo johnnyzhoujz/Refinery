@@ -58,12 +58,22 @@ class ConfigurableLLMProvider(LLMProvider):
                     messages.append({"role": "system", "content": system_prompt})
                 messages.append({"role": "user", "content": prompt})
                 
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens
-                )
+                kwargs = {
+                    "model": self.model,
+                    "messages": messages,
+                }
+
+                is_gpt5 = bool(self.model and self.model.lower().startswith("gpt-5"))
+                if not is_gpt5:
+                    kwargs["temperature"] = temperature
+
+                if max_tokens is not None:
+                    if is_gpt5:
+                        kwargs["max_completion_tokens"] = max_tokens
+                    else:
+                        kwargs["max_tokens"] = max_tokens
+
+                response = await self.client.chat.completions.create(**kwargs)
                 return response.choices[0].message.content
                 
             elif self.provider == "anthropic":

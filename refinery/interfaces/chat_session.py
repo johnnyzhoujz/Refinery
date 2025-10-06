@@ -12,6 +12,7 @@ from typing import Optional
 from .chat_interface import BaseChatInterface
 from ..core.orchestrator import create_orchestrator
 from ..core.context import RefineryContext, load_or_create_context
+from ..utils.config import config
 
 
 async def run_chat_session(
@@ -97,7 +98,189 @@ async def run_chat_session(
         # Step 4: Run the analysis with progress indicators
         await interface.show_progress("🔍 Fetching trace from LangSmith...")
         
-        orchestrator = await create_orchestrator(codebase_abs)
+        def handle_progress(event_type: str, payload: dict) -> None:
+            try:
+                log = interface.console.log
+
+                if event_type == "analysis_started":
+                    log(f"[blue]Starting analysis for trace {payload.get('trace_id', '')}[/blue]")
+                elif event_type == "stage1_planning":
+                    mode = "chunked" if payload.get("chunking") else "single-call"
+                    log(
+                        f"[cyan]Stage 1 planning: {payload.get('total_runs', '?')} runs → {mode}[/cyan]"
+                    )
+                elif event_type == "vector_store_upload_start":
+                    log(
+                        f"[cyan]Staging files for vector store ({payload.get('mode', 'unknown')} mode): "
+                        f"{payload.get('total_files', 0)} files (batch size {payload.get('batch_size', '?')}).[/cyan]"
+                    )
+                elif event_type == "vector_store_batch_start":
+                    log(
+                        f"[white]Uploading batch {payload.get('batch_number')}/{payload.get('total_batches')} "
+                        f"to vector store…[/white]"
+                    )
+                elif event_type == "vector_store_batch_complete":
+                    log(
+                        f"[green]Uploaded batch {payload.get('batch_number')}/{payload.get('total_batches')} "
+                        f"({payload.get('completed_files', 0)} files, {payload.get('duration_seconds', 0)}s).[/green]"
+                    )
+                elif event_type == "vector_store_batch_failed":
+                    log(
+                        f"[red]Vector store batch {payload.get('batch_number')} failed ({payload.get('failed_files', 0)} files).[/red]"
+                    )
+                elif event_type == "vector_store_upload_complete":
+                    log(
+                        f"[green]Vector store staging complete in {payload.get('duration_seconds', 0)}s.[/green]"
+                    )
+                elif event_type == "stage1_chunked_enqueued":
+                    log(
+                        f"[cyan]Stage 1 chunked: {payload.get('total_groups')} groups, group size {payload.get('group_size')}[/cyan]"
+                    )
+                elif event_type == "stage1_single_call_enqueued":
+                    log("[cyan]Stage 1 single-call mode queued.[/cyan]")
+                elif event_type == "stage1_group_start":
+                    log(
+                        f"[white]Stage 1 chunk {payload.get('group_index')}/{payload.get('total_groups')} started[/white]"
+                    )
+                elif event_type == "stage1_group_retry":
+                    attempt = payload.get("attempt") or 0
+                    max_attempts = payload.get("max_attempts") or (attempt + 1)
+                    next_attempt = min(attempt + 1, max_attempts)
+                    error_summary = payload.get("error")
+                    if error_summary:
+                        error_summary = error_summary.strip()
+                        if len(error_summary) > 120:
+                            error_summary = error_summary[:117] + "..."
+                    log(
+                        f"[yellow]Stage 1 chunk {payload.get('group_index')} retrying in {payload.get('backoff_seconds')}s "
+                        f"(attempt {next_attempt}/{max_attempts})"
+                        + (f" – {error_summary}" if error_summary else "")
+                        + "[/yellow]"
+                    )
+                elif event_type == "stage1_group_rate_limited":
+                    log(
+                        f"[yellow]Stage 1 chunk {payload.get('group_index')} waiting {payload.get('wait_seconds')}s for TPM[/yellow]"
+                    )
+                elif event_type == "stage1_group_complete":
+                    log(
+                        f"[green]Stage 1 chunk {payload.get('group_index')} completed (attempts: {payload.get('attempts')})[/green]"
+                    )
+                elif event_type == "stage1_group_failed":
+                    log(
+                        f"[red]Stage 1 chunk {payload.get('group_index')} exhausted retries; continuing with placeholders ({payload.get('error')})[/red]"
+                    )
+                elif event_type == "stage1_group_connection_failed":
+                    log(
+                        f"[red]Stage 1 chunk {payload.get('group_index')} hit repeated connection failures: {payload.get('error', '')[:160]}[/red]"
+                    )
+                elif event_type == "stage1_group_sleep":
+                    log(
+                        f"[white]Stage 1 pausing {payload.get('sleep_seconds')}s before next chunk (completed {payload.get('completed_groups')} groups).[/white]"
+                    )
+                elif event_type == "stage1_chunked_complete":
+                    log(
+                        f"[green]Stage 1 chunked run complete ({payload.get('merged_timeline_items', 0)} timeline items).[/green]"
+                    )
+                elif event_type == "stage1_interactive_complete":
+                    log(
+                        f"[green]Stage 1 completed with {payload.get('timeline_items', 0)} timeline items.[/green]"
+                    )
+                elif event_type == "stage2_start":
+                    log("[cyan]Stage 2 (Gap Analysis) started.[/cyan]")
+                elif event_type == "stage2_retry":
+                    stage2_error = payload.get("error")
+                    note = ""
+                    if stage2_error:
+                        stage2_error = stage2_error.strip()
+                        if len(stage2_error) > 120:
+                            stage2_error = stage2_error[:117] + "..."
+                        note = f" – {stage2_error}"
+                    log(
+                        f"[yellow]Stage 2 retrying in {payload.get('backoff_seconds')}s (attempt {payload.get('attempt') + 1}).{note}[/yellow]"
+                    )
+                elif event_type == "stage2_failed":
+                    log(
+                        f"[red]Stage 2 failed: {payload.get('error')}[/red]"
+                    )
+                elif event_type == "stage2_complete":
+                    log("[green]Stage 2 complete.[/green]")
+                elif event_type == "stage3_start":
+                    log("[cyan]Stage 3 (Diagnosis) started.[/cyan]")
+                elif event_type == "stage3_retry":
+                    stage3_error = payload.get("error")
+                    note = ""
+                    if stage3_error:
+                        stage3_error = stage3_error.strip()
+                        if len(stage3_error) > 120:
+                            stage3_error = stage3_error[:117] + "..."
+                        note = f" – {stage3_error}"
+                    log(
+                        f"[yellow]Stage 3 retrying in {payload.get('backoff_seconds')}s (attempt {payload.get('attempt') + 1}).{note}[/yellow]"
+                    )
+                elif event_type == "stage3_failed":
+                    log(
+                        f"[red]Stage 3 failed: {payload.get('error')}[/red]"
+                    )
+                elif event_type == "stage3_complete":
+                    log(
+                        f"[green]Stage 3 complete – root cause: {payload.get('root_cause', 'n/a')}[/green]"
+                    )
+                elif event_type == "stage4_start":
+                    log("[cyan]Stage 4 (Synthesis) started.[/cyan]")
+                elif event_type == "stage4_retry":
+                    stage4_error = payload.get("error")
+                    note = ""
+                    if stage4_error:
+                        stage4_error = stage4_error.strip()
+                        if len(stage4_error) > 120:
+                            stage4_error = stage4_error[:117] + "..."
+                        note = f" – {stage4_error}"
+                    log(
+                        f"[yellow]Stage 4 retrying in {payload.get('backoff_seconds')}s (attempt {payload.get('attempt') + 1}).{note}[/yellow]"
+                    )
+                elif event_type == "stage4_failed":
+                    log(
+                        f"[red]Stage 4 failed: {payload.get('error')}[/red]"
+                    )
+                elif event_type == "stage4_complete":
+                    log("[green]Stage 4 complete. Preparing final summary...[/green]")
+                elif event_type == "analysis_completed":
+                    log(
+                        f"[green]Analysis finished – failure type: {payload.get('failure_type', 'unknown')}[/green]"
+                    )
+                elif event_type == "hypothesis_best_practices_start":
+                    log("[cyan]Hypothesis: fetching best practices...[/cyan]")
+                elif event_type == "hypothesis_best_practices_complete":
+                    log(
+                        f"[green]Hypothesis best practices ready ({payload.get('count', 0)} matches, {payload.get('elapsed_s', 0)}s).[/green]"
+                    )
+                elif event_type == "hypothesis_generation_start":
+                    log(
+                        f"[cyan]Hypothesis generation ({payload.get('stage', 'unknown')}) started.[/cyan]"
+                    )
+                elif event_type == "hypothesis_generation_chunk_progress":
+                    log(
+                        f"[white]Hypothesis generation progress ({payload.get('stage', 'unknown')}): {int(payload.get('progress', 0)*100)}%.[/white]"
+                    )
+                elif event_type == "hypothesis_generation_complete":
+                    log(
+                        f"[green]Hypothesis generation ({payload.get('stage', 'unknown')}) complete – {payload.get('count', 0)} candidates in {payload.get('elapsed_s', 0)}s.[/green]"
+                    )
+                elif event_type == "hypothesis_rank_start":
+                    log("[cyan]Ranking hypotheses...[/cyan]")
+                elif event_type == "hypothesis_rank_complete":
+                    log(
+                        f"[green]Hypothesis ranking complete ({payload.get('elapsed_s', 0)}s).[/green]"
+                    )
+                elif event_type == "hypothesis_failed":
+                    log(
+                        f"[red]Hypothesis stage failed ({payload.get('stage', 'unknown')}): {payload.get('error', 'unknown error')}[/red]"
+                    )
+            except Exception:
+                if config.debug:
+                    interface.console.log(f"[red]Progress callback error for {event_type}[/red]")
+
+        orchestrator = await create_orchestrator(codebase_abs, progress_callback=handle_progress)
         
         await interface.show_progress("📊 Analyzing trace execution flow... (this may take a minute)")
         
@@ -120,7 +303,7 @@ async def run_chat_session(
             
             try:
                 # Get the trace for prompt extraction
-                trace = await orchestrator.langsmith_client.fetch_trace(trace_id)
+                trace = await orchestrator.ensure_trace(trace_id)
                 
                 # Generate hypothesis with rewritten prompts
                 hypotheses = await orchestrator.generate_hypotheses_from_trace(

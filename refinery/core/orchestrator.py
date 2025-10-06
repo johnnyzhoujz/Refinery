@@ -1,8 +1,9 @@
 """Main orchestrator that coordinates the failure analysis and fix generation workflow."""
 
 import asyncio
+import json
 import os
-from typing import List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import structlog
 
 from .models import (
@@ -17,6 +18,7 @@ from ..agents.hypothesis_generator import AdvancedHypothesisGenerator
 from ..experiments.customer_experiment_manager import CustomerExperimentManager
 from ..analysis.simple_code_reader import build_simple_context
 from ..knowledge.gpt41_patterns import gpt41_knowledge
+from ..utils.config import config
 # Removed AgentContextResolver - using simple file passing instead
 
 logger = structlog.get_logger(__name__)
@@ -25,15 +27,29 @@ logger = structlog.get_logger(__name__)
 class RefineryOrchestrator:
     """Main orchestrator for the Refinery workflow."""
     
-    def __init__(self, codebase_path: str):
+    def __init__(
+        self,
+        codebase_path: str,
+        progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    ):
         self.codebase_path = codebase_path
         self.langsmith_client = None
         self.llm_provider = create_llm_provider()
         self.code_manager = SafeCodeManager(codebase_path)
-        self.failure_analyst = StagedFailureAnalyst()  # Use staged approach to avoid token limits
-        self.hypothesis_generator = AdvancedHypothesisGenerator()
+        self.analysis_seed = getattr(config, "analysis_seed", None)
+        self.failure_analyst = StagedFailureAnalyst(
+            model=getattr(config, "openai_model", "gpt-4o"),
+            seed=self.analysis_seed,
+            progress_callback=progress_callback,
+        )  # Use staged approach to avoid token limits
+        self.hypothesis_generator = AdvancedHypothesisGenerator(progress_callback=progress_callback)
         # Initialize customer experiment manager for hypothesis versions
         self.version_control = CustomerExperimentManager(codebase_path)
+        # Caches for single-fetch invariants
+        self._trace_cache: Dict[str, Trace] = {}
+        self._prompt_eval_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]] = {}
+        self._langsmith_fetch_count: int = 0
+        self._progress_callback = progress_callback
 # Removed AgentContextResolver - using simple file passing instead
     
     async def _init_async(self):
@@ -52,20 +68,32 @@ class RefineryOrchestrator:
     ) -> CompleteAnalysis:
         """Analyze a failed trace and provide diagnosis."""
         logger.info("Starting failure analysis", trace_id=trace_id, project=project)
+        if self._progress_callback:
+            self._progress_callback(
+                "analysis_started",
+                {"trace_id": trace_id, "project": project},
+            )
         
         # Initialize async components
         await self._init_async()
+
+        # 1. Fetch trace from LangSmith (single-fetch invariant)
+        self._langsmith_fetch_count = 0
+        trace, cache_hit = await self._get_or_fetch_trace(trace_id)
+        logger.info("Fetched trace", runs_count=len(trace.runs), cache_hit=cache_hit)
+        trace.metadata["langsmith_fetch_count"] = self._langsmith_fetch_count
+        trace.metadata["langsmith_cache_hit"] = cache_hit
+        trace.metadata["analysis_seed"] = self.analysis_seed
         
-        # 1. Fetch trace from LangSmith
-        trace = await self.langsmith_client.fetch_trace(trace_id)
-        logger.info("Fetched trace", runs_count=len(trace.runs))
-        
-        # 2. Log provided files
+        # 2. Log provided files only when overrides supplied
         prompt_file_count = len(prompt_contents or {})
         eval_file_count = len(eval_contents or {})
-        logger.info("Using provided files", 
-                   prompt_files=prompt_file_count,
-                   eval_files=eval_file_count)
+        if prompt_file_count or eval_file_count:
+            logger.info(
+                "Using provided files",
+                prompt_files=prompt_file_count,
+                eval_files=eval_file_count
+            )
         
         # 3. Create domain expert expectation
         expectation = DomainExpertExpectation(
@@ -73,23 +101,37 @@ class RefineryOrchestrator:
             business_context=business_context
         )
         
-        # 4. Analyze the trace with provided files
+        # Resolve prompts/evals (prefer LangSmith bundle, fall back to supplied context)
+        resolved_prompts, resolved_evals = await self._resolve_analysis_context(
+            trace, prompt_contents, eval_contents
+        )
+
+        # 4. Analyze the trace with resolved files
         trace_analysis = await self.failure_analyst.analyze_trace(
-            trace, expectation, prompt_contents, eval_contents
+            trace, expectation, resolved_prompts, resolved_evals
         )
         logger.info("Completed trace analysis")
-        
+
         # 5. Compare to expected behavior
         gap_analysis = await self.failure_analyst.compare_to_expected(
-            trace_analysis, expectation, prompt_contents, eval_contents
+            trace_analysis, expectation, resolved_prompts, resolved_evals
         )
         logger.info("Completed gap analysis")
-        
+
         # 6. Diagnose the failure
         diagnosis = await self.failure_analyst.diagnose_failure(
-            trace_analysis, gap_analysis, prompt_contents, eval_contents
+            trace_analysis, gap_analysis, resolved_prompts, resolved_evals
         )
         logger.info("Completed diagnosis", failure_type=diagnosis.failure_type.value)
+        if self._progress_callback:
+            self._progress_callback(
+                "analysis_completed",
+                {
+                    "trace_id": trace_id,
+                    "project": project,
+                    "failure_type": diagnosis.failure_type.value,
+                },
+            )
         
         # Return complete analysis with all intermediate results
         return CompleteAnalysis(
@@ -119,15 +161,22 @@ class RefineryOrchestrator:
         
         # 3. Generate hypotheses
         hypotheses = await self.hypothesis_generator.generate_hypotheses(
-            diagnosis, 
-            code_context, 
-            best_practices
+            diagnosis=diagnosis,
+            code_context=code_context,
+            best_practices=best_practices,
         )
         
         # 4. Rank hypotheses
+        context_summary = {}
+        try:
+            context_summary = {"code_context": code_context.model_dump()}
+        except AttributeError:
+            # Fallback for non-pydantic implementations
+            context_summary = {"code_context": getattr(code_context, "__dict__", str(code_context))}
+
         ranked_hypotheses = await self.hypothesis_generator.rank_hypotheses(
-            hypotheses, 
-            {"code_context": code_context}
+            hypotheses,
+            context_summary,
         )
         
         logger.info("Generated hypotheses", count=len(ranked_hypotheses))
@@ -142,13 +191,10 @@ class RefineryOrchestrator:
         """Generate hypotheses using trace for prompt extraction and rewriting."""
         logger.info("Generating hypotheses from trace", failure_type=diagnosis.failure_type.value)
         
-        # Get model-specific best practices based on trace model or default
-        model = getattr(trace, 'model', None) or config.hypothesis_model
-        best_practices = await self.hypothesis_generator.search_best_practices(
-            failure_type=diagnosis.failure_type.value,
-            model=model,
-            context={"diagnosis": diagnosis.root_cause}
-        )
+        # Skip best practices search - it's unreliable and causes timeouts
+        # Hypothesis generation works fine without it (proven by test_hypothesis_only.py)
+        best_practices = []
+        logger.info("Skipping best practices search (not required for trace-based generation)")
         
         # Generate hypotheses with full trace context (this will extract prompts internally)
         hypotheses = await self.hypothesis_generator.generate_hypotheses(
@@ -160,7 +206,108 @@ class RefineryOrchestrator:
         
         logger.info("Generated trace-based hypotheses", count=len(hypotheses))
         return hypotheses[:max_hypotheses]
-    
+
+    def get_cached_trace(self, trace_id: str) -> Optional[Trace]:
+        """Return a cached trace if available."""
+        return self._trace_cache.get(trace_id)
+
+    def get_run_metadata(self) -> Dict[str, Any]:
+        """Expose run metadata such as fetch counts and seed."""
+        return {
+            "langsmith_fetch_count": self._langsmith_fetch_count,
+            "analysis_seed": self.analysis_seed,
+        }
+
+    async def ensure_trace(self, trace_id: str) -> Trace:
+        """Ensure a trace is available, fetching it at most once."""
+        trace, _ = await self._get_or_fetch_trace(trace_id)
+        return trace
+
+    async def _get_or_fetch_trace(self, trace_id: str) -> Tuple[Trace, bool]:
+        """Return cached trace if available; otherwise fetch and cache it."""
+        if trace_id in self._trace_cache:
+            return self._trace_cache[trace_id], True
+
+        trace = await self.langsmith_client.fetch_trace(trace_id)
+        self._langsmith_fetch_count += 1
+        self._trace_cache[trace_id] = trace
+        return trace, False
+
+    async def _resolve_analysis_context(
+        self,
+        trace: Trace,
+        prompt_contents: Optional[Dict[str, str]],
+        eval_contents: Optional[Dict[str, str]]
+    ) -> Tuple[Dict[str, str], Dict[str, str]]:
+        """Resolve prompt/eval bundles, preferring LangSmith extraction."""
+        cache_key = trace.trace_id
+
+        provided_prompts = dict(prompt_contents) if prompt_contents else None
+        provided_evals = dict(eval_contents) if eval_contents else None
+
+        if cache_key in self._prompt_eval_cache and not provided_prompts and not provided_evals:
+            return self._prompt_eval_cache[cache_key]
+
+        if not provided_prompts or not provided_evals:
+            extracted_prompts, extracted_evals = self._extract_prompt_eval_bundle(trace)
+        else:
+            extracted_prompts, extracted_evals = {}, {}
+
+        resolved_prompts = provided_prompts or extracted_prompts
+        resolved_evals = provided_evals or extracted_evals
+
+        self._prompt_eval_cache[cache_key] = (resolved_prompts, resolved_evals)
+        logger.info(
+            "Resolved analysis context",
+            trace_id=trace.trace_id,
+            prompt_files=len(resolved_prompts),
+            eval_files=len(resolved_evals),
+            source="provided" if provided_prompts or provided_evals else "langsmith"
+        )
+        return resolved_prompts, resolved_evals
+
+    def _extract_prompt_eval_bundle(self, trace: Trace) -> Tuple[Dict[str, str], Dict[str, str]]:
+        """Extract prompt/eval content from LangSmith trace."""
+        extracted = self.langsmith_client.extract_prompts_from_trace(trace)
+
+        prompt_files: Dict[str, str] = {}
+        eval_files: Dict[str, str] = {}
+
+        for idx, prompt in enumerate(extracted.get("system_prompts", []), start=1):
+            content = prompt.get("content")
+            if not content:
+                continue
+            label = prompt.get("run_name") or "system"
+            filename = f"system_{idx:02d}_{self._sanitize_label(label)}.md"
+            prompt_files[filename] = content
+
+        for idx, prompt in enumerate(extracted.get("user_prompts", []), start=1):
+            content = prompt.get("content")
+            if not content:
+                continue
+            label = prompt.get("run_name") or "user"
+            filename = f"user_{idx:02d}_{self._sanitize_label(label)}.md"
+            prompt_files[filename] = content
+
+        for idx, template in enumerate(extracted.get("prompt_templates", []), start=1):
+            content = template.get("content")
+            if not content:
+                continue
+            key = template.get("key") or "template"
+            filename = f"template_{idx:02d}_{self._sanitize_label(key)}.md"
+            prompt_files[filename] = content
+
+        for idx, example in enumerate(extracted.get("eval_examples", []), start=1):
+            filename = f"eval_case_{idx:02d}.json"
+            eval_files[filename] = json.dumps(example, indent=2, default=str)
+
+        return prompt_files, eval_files
+
+    def _sanitize_label(self, label: str) -> str:
+        sanitized = ''.join(ch if ch.isalnum() or ch in {"-", "_"} else '_' for ch in label.lower())
+        sanitized = sanitized.strip('_')
+        return sanitized or "item"
+
     async def apply_hypothesis(
         self,
         hypothesis: Hypothesis,
@@ -294,9 +441,12 @@ class RefineryOrchestrator:
             return "unknown"
 
 
-async def create_orchestrator(codebase_path: str) -> RefineryOrchestrator:
+async def create_orchestrator(
+    codebase_path: str,
+    progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+) -> RefineryOrchestrator:
     """Factory function to create an orchestrator."""
-    orchestrator = RefineryOrchestrator(codebase_path)
+    orchestrator = RefineryOrchestrator(codebase_path, progress_callback=progress_callback)
     # Ensure async dependencies (e.g., LangSmith client) are initialized
     await orchestrator._init_async()
     return orchestrator
