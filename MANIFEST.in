@@ -1,0 +1,13 @@
+# Include example traces
+include examples/*.json
+include examples/README.md
+
+# Include schema files
+include schema/README.md
+include schema/*.yaml
+
+# Include documentation
+include README.md
+include LICENSE
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md

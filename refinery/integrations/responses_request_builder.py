@@ -5,7 +5,7 @@ This module constructs proper request bodies for the Interactive Responses API
 with Vector Store + File Search integration.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, Optional
 
 
 def build_responses_body(
@@ -22,7 +22,7 @@ def build_responses_body(
 ) -> Dict[str, Any]:
     """
     Build a complete request body for OpenAI Responses API.
-    
+
     Args:
         model: Model to use (e.g., "gpt-4o")
         vector_store_id: ID of the vector store containing files
@@ -33,53 +33,49 @@ def build_responses_body(
         max_output_tokens: Max tokens in response
         temperature: Model temperature
         reasoning_effort: Reasoning effort for GPT-5 models (minimal, low, medium, high)
-    
+
     Returns:
         Complete request body for /v1/responses endpoint
     """
-    
+
     # Validate schema has root type object
     if not json_schema_obj.get("type") == "object":
         raise ValueError("Schema must have root type: 'object'")
-    
+
     body = {
         "model": model,
         "tools": [
             {
                 "type": "file_search",
                 "vector_store_ids": [vector_store_id],
-                "max_num_results": max_num_results
+                "max_num_results": max_num_results,
             }
         ],
         "input": [
             {
                 "type": "message",
                 "role": "system",
-                "content": [
-                    {"type": "input_text", "text": system_text}
-                ]
+                "content": [{"type": "input_text", "text": system_text}],
             },
             {
                 "type": "message",
                 "role": "user",
-                "content": [
-                    {"type": "input_text", "text": user_text}
-                ]
-            }
+                "content": [{"type": "input_text", "text": user_text}],
+            },
         ],
         "text": {
             "format": {
                 "type": "json_schema",
                 "name": "stage_output",
                 "strict": True,
-                "schema": json_schema_obj  # MUST be {"type": "object", ...}
+                "schema": json_schema_obj,  # MUST be {"type": "object", ...}
             }
-        }
+        },
     }
 
     if temperature is not None and _supports_temperature(model):
         body["temperature"] = temperature
-    
+
     # Add reasoning configuration when provided
     if reasoning_effort and _supports_reasoning(model):
         body["reasoning"] = {"effort": reasoning_effort}
@@ -89,7 +85,7 @@ def build_responses_body(
 
     if seed is not None and _supports_seed(model):
         body["seed"] = seed
-    
+
     return body
 
 
@@ -131,31 +127,27 @@ def build_responses_body_no_tools(
             {
                 "type": "message",
                 "role": "system",
-                "content": [
-                    {"type": "input_text", "text": system_text}
-                ]
+                "content": [{"type": "input_text", "text": system_text}],
             },
             {
                 "type": "message",
                 "role": "user",
-                "content": [
-                    {"type": "input_text", "text": user_text}
-                ]
-            }
+                "content": [{"type": "input_text", "text": user_text}],
+            },
         ],
         "text": {
             "format": {
                 "type": "json_schema",
                 "name": "stage_output",
                 "strict": strict,
-                "schema": json_schema_obj
+                "schema": json_schema_obj,
             }
-        }
+        },
     }
 
     if temperature is not None and _supports_temperature(model):
         body["temperature"] = temperature
-    
+
     # Add reasoning configuration when provided
     if reasoning_effort and _supports_reasoning(model):
         body["reasoning"] = {"effort": reasoning_effort}
@@ -192,7 +184,7 @@ def _supports_seed(model: str) -> bool:
 def build_canary_test_body() -> Dict[str, Any]:
     """
     Build a minimal canary test request to validate API connectivity.
-    
+
     Returns:
         Minimal request body for basic connectivity test
     """
@@ -201,10 +193,8 @@ def build_canary_test_body() -> Dict[str, Any]:
         "input": [
             {
                 "type": "message",
-                "role": "user", 
-                "content": [
-                    {"type": "input_text", "text": "Reply PONG"}
-                ]
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Reply PONG"}],
             }
         ],
         "text": {
@@ -214,12 +204,10 @@ def build_canary_test_body() -> Dict[str, Any]:
                 "strict": True,
                 "schema": {
                     "type": "object",
-                    "properties": {
-                        "response": {"type": "string"}
-                    },
+                    "properties": {"response": {"type": "string"}},
                     "required": ["response"],
-                    "additionalProperties": False
-                }
+                    "additionalProperties": False,
+                },
             }
-        }
+        },
     }

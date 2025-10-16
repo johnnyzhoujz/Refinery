@@ -155,7 +155,7 @@ Before any analysis, assess token usage:
 2. **Truncation Detection**: >90% usage indicates risk, identify exact cutoff
 3. **Token Failure Patterns**:
    - HARD_TRUNCATION: Output cut mid-sentence at token limit
-   - SOFT_TRUNCATION: Rushed conclusion as limit approached  
+   - SOFT_TRUNCATION: Rushed conclusion as limit approached
    - CONTEXT_STARVATION: All tokens consumed by prompt, no response space
    - ATTENTION_DILUTION: Too much context, model can't focus
 
@@ -163,7 +163,7 @@ Before any analysis, assess token usage:
 
 Extract from trace:
 1. Agent's intended task (from initial user input)
-2. Expected behavior/output (from user description)  
+2. Expected behavior/output (from user description)
 3. Execution flow (sequence of runs via dotted_order)
 4. Model configuration (GPT-4, temperature, etc.)
 5. Available context (prompts, templates, retrieved data)
@@ -182,7 +182,7 @@ Compare expected vs actual:
 Check common patterns first, but don't force-fit:
 - **CONTEXT_OVERFLOW**: Performance degrades with input size
 - **INSTRUCTION_GAP**: Agent does something never specified
-- **FORMAT_VIOLATION**: Output structure doesn't match requirements  
+- **FORMAT_VIOLATION**: Output structure doesn't match requirements
 - **STATE_CONFUSION**: Lost track of conversation context
 - **TOOL_FAILURE**: API calls or retrievals failed
 - **CASCADE_FAILURE**: One failure triggers chain reaction
@@ -201,13 +201,13 @@ EXPECTED: Should acknowledge no memory storage
 
 ANALYSIS:
 - Divergence: Run #3 - claimed non-existent capability
-- Pattern: INSTRUCTION_GAP  
+- Pattern: INSTRUCTION_GAP
 - Evidence: System prompt lacks "Tell users you cannot remember"
 - Root Cause: Missing explicit memory limitation instruction
 - Confidence: HIGH (90%)
 ```
 
-### Example 2: Context Overflow  
+### Example 2: Context Overflow
 ```
 TRACE: f15d6017-6be7-4278-9446-5fe9f3ff7065
 TOKENS: 14892/16000 (93%) - CRITICAL
@@ -233,7 +233,7 @@ ANALYSIS:
     "confidence": 0.85,
     "divergence_point": "run_X",
     "token_health": {
-      "status": "HEALTHY|WARNING|CRITICAL", 
+      "status": "HEALTHY|WARNING|CRITICAL",
       "usage": "14892/16000",
       "truncated": true,
       "impact": "Lost last 150 products"
@@ -249,7 +249,7 @@ ANALYSIS:
     "business": "Impact on end users"
   },
   "fixes": {
-    "immediate": "Quick mitigation to stop bleeding", 
+    "immediate": "Quick mitigation to stop bleeding",
     "systematic": "Long-term architectural solution"
   },
   "narrative_analysis": "Detailed free-form explanation preserving nuance and context for complex cases"
@@ -258,7 +258,7 @@ ANALYSIS:
 
 ## Evidence Standards (Preserved from V1)
 - Quote exact text from traces - no paraphrasing
-- Include frequency data ("73% of similar inputs")  
+- Include frequency data ("73% of similar inputs")
 - Assess business impact: CRITICAL/HIGH/MEDIUM/LOW
 - Confidence levels: HIGH (>90%), MEDIUM (70-90%), LOW (<70%)
 
@@ -415,20 +415,20 @@ Ranked Hypotheses:
 1. [Highest Confidence Fix]
    Confidence: HIGH (85%)
    Risk: LOW
-   
+
    Changes:
    - PROMPT: [Specific modifications with before/after]
    - EVAL: [Any evaluation changes needed]
-   
+
    Implementation:
    ```python
    # Before
    prompt = "..."
-   
+
    # After
    prompt = "..."
    ```
-   
+
    Expected Impact:
    - Fix rate: ~80% of current failures
    - Performance: No degradation expected
@@ -629,7 +629,7 @@ check_backwards_compatibility(original, modified_content)
 feat(prompts): improve clarity in [specific prompt name]
 
 - Added explicit formatting instructions for JSON output
-- Clarified ambiguous terms in user instructions  
+- Clarified ambiguous terms in user instructions
 - Added error handling for edge case [X]
 
 Addresses: [Issue/Failure ID]
@@ -663,10 +663,10 @@ def test_prompt_output_format():
     # Arrange
     input_data = {"user_query": "test input"}
     expected_format = {"response": str, "confidence": float}
-    
+
     # Act
     result = run_prompt(PROMPT_TEMPLATE, input_data)
-    
+
     # Assert
     assert validate_json_structure(result, expected_format)
     assert 0 <= result["confidence"] <= 1
@@ -701,15 +701,15 @@ def pre_change_validation(file_path):
     # Check file exists and is readable
     assert os.path.exists(file_path)
     assert os.access(file_path, os.R_OK | os.W_OK)
-    
+
     # Verify not in production without flag
     if is_production_env() and not has_override_flag():
         raise SafetyError("Production changes require override flag")
-    
+
     # Check for recent modifications
     if was_recently_modified(file_path, hours=1):
         log_warning("File was recently modified")
-    
+
     # Validate current state
     validate_current_functionality(file_path)
 ```
@@ -719,13 +719,13 @@ def pre_change_validation(file_path):
 def post_change_validation(file_path, original_backup):
     # Syntax validation
     validate_file_syntax(file_path)
-    
+
     # Regression testing
     run_regression_tests(file_path, original_backup)
-    
+
     # Performance check
     assert performance_not_degraded(file_path, original_backup)
-    
+
     # Rollback preparation
     prepare_rollback_script(file_path, original_backup)
 ```
@@ -760,7 +760,7 @@ Files Modified:
    - Changes: Updated system prompt for clarity
    - Lines modified: 45-67
    - Risk: LOW
-   
+
 2. /path/to/evaluations.py
    - Changes: Added test case for edge condition
    - Lines modified: 123-145
@@ -858,7 +858,7 @@ The complete trace data with ALL runs (no truncation) and agent context files is
 
 Analyze the execution trace systematically:
 1. Map the execution flow - what was the agent trying to accomplish?
-2. For each step, analyze what context was available vs needed  
+2. For each step, analyze what context was available vs needed
 3. Track data transformations - how did inputs become outputs?
 4. If there were errors, trace how they propagated
 5. Identify any issues or anomalies in execution
@@ -885,7 +885,7 @@ Use the attached file data to inform all sections. The file contains:
 - Complete trace metadata
 - ALL execution runs with full inputs/outputs (no truncation)
 - Agent prompt files (if provided)
-- Agent evaluation files (if provided) 
+- Agent evaluation files (if provided)
 - Expectation details
 
 === OUTPUT REQUIREMENTS ===
@@ -941,7 +941,7 @@ Check if the agent behavior matches business requirements:
 
 Extract from trace via file search:
 1. Agent's intended task (from initial user input)
-2. Expected behavior/output (from user description)  
+2. Expected behavior/output (from user description)
 3. Execution flow (sequence of runs via dotted_order)
 4. Model configuration (GPT-4, temperature, etc.)
 5. Available context (prompts, templates, retrieved data)
@@ -1003,13 +1003,13 @@ EXPECTED: Should acknowledge no memory storage
 
 ANALYSIS:
 - Divergence: Run #3 - claimed non-existent capability
-- Pattern: INSTRUCTION_GAP  
+- Pattern: INSTRUCTION_GAP
 - Evidence: System prompt lacks "Tell users you cannot remember"
 - Root Cause: Missing explicit memory limitation instruction
 - Confidence: HIGH (90%)
 ```
 
-### Example 2: Context Overflow  
+### Example 2: Context Overflow
 ```
 TRACE: f15d6017-6be7-4278-9446-5fe9f3ff7065
 TOKENS: 14892/16000 (93%) - CRITICAL
@@ -1027,7 +1027,7 @@ ANALYSIS:
 
 ## Evidence Standards (Enhanced for File Search)
 - Quote exact text from retrieved files - no paraphrasing
-- Include frequency data when available ("73% of similar inputs")  
+- Include frequency data when available ("73% of similar inputs")
 - Assess business impact: CRITICAL/HIGH/MEDIUM/LOW
 - Confidence levels: HIGH (>90%), MEDIUM (70-90%), LOW (<70%)
 - Always cite file sources with sections/line references
@@ -1105,7 +1105,7 @@ File Search Protocol:
 
 Pattern Priority (check in this order):
 1. INSTRUCTION_GAP - Missing or unclear prompt instructions
-2. PROMPT_CONTRADICTION - Conflicting directives in prompts  
+2. PROMPT_CONTRADICTION - Conflicting directives in prompts
 3. EVAL_MISMATCH - Evaluation criteria misaligned with needs
 4. BUSINESS_LOGIC_ERROR - Requirements not properly encoded
 5. FORMAT_VIOLATION - Output structure issues
@@ -1142,15 +1142,27 @@ Stage 1: {stage1_json}
 Stage 2: {stage2_json}
 Stage 3: {stage3_json}"""
 
-# Import versioning system  
+# Import versioning system
 from .prompt_versions import get_versioned_prompt
 
 # Backward compatibility - non-versioned names point to current versions
-FAILURE_ANALYST_SYSTEM_PROMPT = get_versioned_prompt("FAILURE_ANALYST_SYSTEM_PROMPT", context=globals())
-HOLISTIC_ANALYSIS_TEMPLATE = get_versioned_prompt("HOLISTIC_ANALYSIS_TEMPLATE", context=globals())
+FAILURE_ANALYST_SYSTEM_PROMPT = get_versioned_prompt(
+    "FAILURE_ANALYST_SYSTEM_PROMPT", context=globals()
+)
+HOLISTIC_ANALYSIS_TEMPLATE = get_versioned_prompt(
+    "HOLISTIC_ANALYSIS_TEMPLATE", context=globals()
+)
 
 # Staged analysis prompts
-STAGE1_TRACE_ANALYSIS_PROMPT = get_versioned_prompt("STAGE1_TRACE_ANALYSIS_PROMPT", context=globals())
-STAGE2_GAP_ANALYSIS_PROMPT = get_versioned_prompt("STAGE2_GAP_ANALYSIS_PROMPT", context=globals())
-STAGE3_DIAGNOSIS_PROMPT = get_versioned_prompt("STAGE3_DIAGNOSIS_PROMPT", context=globals())
-STAGE4_SYNTHESIS_PROMPT = get_versioned_prompt("STAGE4_SYNTHESIS_PROMPT", context=globals())
+STAGE1_TRACE_ANALYSIS_PROMPT = get_versioned_prompt(
+    "STAGE1_TRACE_ANALYSIS_PROMPT", context=globals()
+)
+STAGE2_GAP_ANALYSIS_PROMPT = get_versioned_prompt(
+    "STAGE2_GAP_ANALYSIS_PROMPT", context=globals()
+)
+STAGE3_DIAGNOSIS_PROMPT = get_versioned_prompt(
+    "STAGE3_DIAGNOSIS_PROMPT", context=globals()
+)
+STAGE4_SYNTHESIS_PROMPT = get_versioned_prompt(
+    "STAGE4_SYNTHESIS_PROMPT", context=globals()
+)

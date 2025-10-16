@@ -1,0 +1,388 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "https://raw.githubusercontent.com/johnnyzhoujz/Refinery/v0.1.0/schema/hypothesis-pack-v1.yaml"
+title: "Hypothesis Pack v1"
+description: "Structured, versioned output format for Refinery AI agent failure analysis"
+type: "object"
+additionalProperties: false
+required:
+  - "$schema"
+  - "version"
+  - "metadata"
+  - "findings"
+  - "hypotheses"
+  - "reproducibility"
+
+properties:
+  $schema:
+    type: "string"
+    description: "JSON Schema identifier URL"
+    const: "https://raw.githubusercontent.com/johnnyzhoujz/Refinery/v0.1.0/schema/hypothesis-pack-v1.yaml"
+
+  version:
+    type: "string"
+    description: "Schema version following semantic versioning"
+    pattern: "^\\d+\\.\\d+\\.\\d+$"
+    examples:
+      - "1.0.0"
+      - "1.1.0"
+
+  metadata:
+    type: "object"
+    description: "Trace and analysis metadata"
+    additionalProperties: false
+    required:
+      - "trace_id"
+      - "project"
+      - "analyzed_at"
+      - "refinery_version"
+      - "analysis_model"
+      - "hypothesis_model"
+      - "confidence_methodology"
+    properties:
+      trace_id:
+        type: "string"
+        description: "LangSmith trace ID or local trace identifier"
+        minLength: 1
+        examples:
+          - "demo-trace-001"
+          - "b9e570b7-007d-4e10-afea-42f351a5e9f0"
+
+      project:
+        type: "string"
+        description: "Project name from LangSmith or user-specified"
+        minLength: 1
+        examples:
+          - "production-agent"
+          - "demo-project"
+
+      analyzed_at:
+        type: "string"
+        description: "Analysis completion timestamp in ISO 8601 format"
+        format: "date-time"
+        examples:
+          - "2025-10-15T14:32:15.123Z"
+
+      refinery_version:
+        type: "string"
+        description: "Refinery package version (semver)"
+        pattern: "^\\d+\\.\\d+\\.\\d+.*$"
+        examples:
+          - "0.1.0"
+          - "0.2.0-beta"
+
+      analysis_model:
+        type: "string"
+        description: "Model used for trace analysis"
+        minLength: 1
+        examples:
+          - "gpt-5-preview"
+          - "gpt-4o"
+
+      hypothesis_model:
+        type: "string"
+        description: "Model used for hypothesis generation"
+        minLength: 1
+        examples:
+          - "gpt-5-preview"
+          - "gpt-4o"
+
+      confidence_methodology:
+        type: "string"
+        description: "Method used to compute confidence scores"
+        enum:
+          - "evidence-based-ranking"
+          - "llm-self-assessment"
+          - "hybrid"
+
+      total_analysis_time_ms:
+        type: "integer"
+        description: "Total wall-clock time for complete analysis (milliseconds)"
+        minimum: 0
+        examples:
+          - 45230
+          - 12500
+
+  findings:
+    type: "array"
+    description: "Diagnostic findings from trace analysis"
+    minItems: 1
+    items:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "type"
+        - "description"
+        - "evidence"
+        - "severity"
+      properties:
+        type:
+          type: "string"
+          description: "Category of finding"
+          enum:
+            - "gap"
+            - "error"
+            - "inefficiency"
+
+        description:
+          type: "string"
+          description: "Human-readable summary of the finding"
+          minLength: 10
+          maxLength: 500
+
+        evidence:
+          type: "array"
+          description: "Concrete evidence supporting this finding"
+          minItems: 1
+          items:
+            type: "string"
+            minLength: 1
+
+        severity:
+          type: "string"
+          description: "Severity/impact of this finding"
+          enum:
+            - "critical"
+            - "high"
+            - "medium"
+            - "low"
+
+        affected_components:
+          type: "array"
+          description: "List of component names affected by this finding"
+          items:
+            type: "string"
+            minLength: 1
+
+  hypotheses:
+    type: "array"
+    description: "Ranked hypotheses with proposed fixes"
+    minItems: 1
+    items:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "description"
+        - "rationale"
+        - "confidence"
+        - "risks"
+        - "proposed_changes"
+      properties:
+        id:
+          type: "string"
+          description: "Unique hypothesis identifier (format: hyp-NNN)"
+          pattern: "^hyp-\\d{3}$"
+          examples:
+            - "hyp-001"
+            - "hyp-042"
+
+        description:
+          type: "string"
+          description: "Concise summary of the proposed fix"
+          minLength: 10
+          maxLength: 200
+
+        rationale:
+          type: "string"
+          description: "Explanation of why this fix should work"
+          minLength: 20
+          maxLength: 1000
+
+        confidence:
+          type: "string"
+          description: "Confidence level in this hypothesis"
+          enum:
+            - "high"
+            - "medium"
+            - "low"
+
+        risks:
+          type: "array"
+          description: "Potential risks or side effects of this change"
+          items:
+            type: "string"
+            minLength: 1
+
+        proposed_changes:
+          type: "array"
+          description: "Concrete file changes to implement this fix"
+          minItems: 0
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "file_path"
+              - "change_type"
+              - "description"
+              - "original_content"
+              - "new_content"
+            properties:
+              file_path:
+                type: "string"
+                description: "Path to the file to modify (must start with allowed prefix)"
+                pattern: "^(prompts|config|orchestration|tests|evals)/.*"
+                examples:
+                  - "prompts/intent_classifier/system.txt"
+                  - "config/model_config.yaml"
+
+              change_type:
+                type: "string"
+                description: "Type of change being proposed"
+                enum:
+                  - "prompt_modification"
+                  - "eval_modification"
+                  - "config_change"
+                  - "orchestration_suggestion"
+
+              description:
+                type: "string"
+                description: "Summary of what's being changed"
+                minLength: 10
+                maxLength: 200
+
+              original_content:
+                type: "string"
+                description: "Current content of the file/section"
+
+              new_content:
+                type: "string"
+                description: "Proposed new content"
+
+              diff:
+                type: "string"
+                description: "Unified diff format (optional but recommended)"
+
+        example_before:
+          type: "string"
+          description: "Example demonstrating current (broken) behavior"
+          maxLength: 500
+
+        example_after:
+          type: "string"
+          description: "Example demonstrating expected (fixed) behavior"
+          maxLength: 500
+
+        generation_metadata:
+          type: "object"
+          description: "Metadata about how this hypothesis was generated"
+          additionalProperties: false
+          properties:
+            model:
+              type: "string"
+              description: "Model name used for hypothesis generation"
+              examples:
+                - "gpt-5-preview"
+
+            provider:
+              type: "string"
+              description: "LLM provider"
+              examples:
+                - "openai"
+                - "anthropic"
+
+            max_tokens:
+              type: "integer"
+              description: "Max output tokens configured"
+              minimum: 0
+
+            reasoning_effort:
+              type: "string"
+              description: "Reasoning effort level (for reasoning models)"
+              enum:
+                - "minimal"
+                - "low"
+                - "medium"
+                - "high"
+
+            diagnosis_hash:
+              type: "string"
+              description: "SHA-256 hash of the diagnosis"
+              pattern: "^sha256:[a-f0-9]{64}$"
+              examples:
+                - "sha256:a3f4b2c1d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2"
+
+            created_at:
+              type: "string"
+              description: "Timestamp when hypothesis was generated"
+              format: "date-time"
+
+            schema_version:
+              type: "string"
+              description: "Internal schema version used for generation"
+
+            attempts:
+              type: "integer"
+              description: "Number of retry attempts (1 = first attempt succeeded)"
+              minimum: 1
+
+            response_id:
+              type: "string"
+              description: "Provider-specific response ID for debugging"
+
+  reproducibility:
+    type: "object"
+    description: "Reproducibility metadata"
+    additionalProperties: false
+    required:
+      - "diagnosis_hash"
+    properties:
+      seed:
+        type: ["integer", "null"]
+        description: "Random seed for deterministic generation (nullable)"
+
+      model_params:
+        type: "object"
+        description: "Model hyperparameters used during analysis"
+        additionalProperties: false
+        properties:
+          temperature:
+            type: "number"
+            description: "Sampling temperature"
+            minimum: 0.0
+            maximum: 2.0
+
+          top_p:
+            type: "number"
+            description: "Nucleus sampling parameter"
+            minimum: 0.0
+            maximum: 1.0
+
+          frequency_penalty:
+            type: "number"
+            description: "Frequency penalty"
+            minimum: -2.0
+            maximum: 2.0
+
+          presence_penalty:
+            type: "number"
+            description: "Presence penalty"
+            minimum: -2.0
+            maximum: 2.0
+
+      diagnosis_hash:
+        type: "string"
+        description: "SHA-256 hash of the complete diagnosis"
+        pattern: "^sha256:[a-f0-9]{64}$"
+        examples:
+          - "sha256:a3f4b2c1d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2"
+
+      refinery_config:
+        type: "object"
+        description: "Refinery-specific configuration used"
+        additionalProperties: true
+        properties:
+          analysis_model:
+            type: "string"
+            description: "Model used for analysis"
+
+          hypothesis_model:
+            type: "string"
+            description: "Model used for hypothesis generation"
+
+          hypothesis_reasoning_effort:
+            type: "string"
+            description: "Reasoning effort level"
+
+          hypothesis_max_tokens:
+            type: "integer"
+            description: "Max tokens for hypothesis generation"

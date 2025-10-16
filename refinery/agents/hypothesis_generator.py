@@ -5,32 +5,37 @@ This module generates ranked hypotheses for fixing AI agent failures, leveraging
 best practices and advanced prompting strategies.
 """
 
+import hashlib
 import json
 import logging
 import time
 import uuid
-import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+
 from jinja2 import Template
 
 from ..core.interfaces import HypothesisGenerator
 from ..core.models import (
-    Diagnosis, Hypothesis, FileChange, CodeContext,
-    ChangeType, Confidence, FailureType
+    ChangeType,
+    CodeContext,
+    Confidence,
+    Diagnosis,
+    FailureType,
+    FileChange,
+    Hypothesis,
 )
-from ..knowledge.gpt41_patterns import gpt41_knowledge
-from ..utils.config import config
 from ..integrations import responses_client
 from ..integrations.responses_request_builder import build_responses_body_no_tools
+from ..utils.config import config
 
 logger = logging.getLogger(__name__)
 
 
 class AdvancedHypothesisGenerator(HypothesisGenerator):
     """Advanced implementation of HypothesisGenerator using multi-strategy generation."""
-    
+
     def __init__(self, progress_callback: Optional[Any] = None):
         # Store hypothesis generation settings for metadata (deterministic)
         self.hypothesis_model = config.hypothesis_model
@@ -77,10 +82,14 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
         try:
             return Path(file_path).read_text(encoding="utf-8")
         except Exception:
-            logger.debug("Could not read original content for %s", file_path, exc_info=True)
+            logger.debug(
+                "Could not read original content for %s", file_path, exc_info=True
+            )
             return ""
 
-    def _emit_progress(self, event_type: str, payload: Optional[Dict[str, Any]] = None) -> None:
+    def _emit_progress(
+        self, event_type: str, payload: Optional[Dict[str, Any]] = None
+    ) -> None:
         if not self._progress_callback:
             return
         try:
@@ -88,7 +97,9 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
         except Exception:
             logger.debug("Hypothesis progress callback raised", exc_info=True)
 
-    def _format_code_context(self, code_context: Optional[CodeContext]) -> Dict[str, Any]:
+    def _format_code_context(
+        self, code_context: Optional[CodeContext]
+    ) -> Dict[str, Any]:
         if not code_context:
             return {
                 "repository_path": "unknown",
@@ -105,7 +116,9 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             "dependencies": getattr(code_context, "dependencies", {}),
         }
 
-    def _format_best_practices(self, best_practices: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    def _format_best_practices(
+        self, best_practices: Optional[List[Dict[str, Any]]]
+    ) -> List[Dict[str, Any]]:
         if not best_practices:
             return []
         return best_practices
@@ -154,9 +167,12 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
 
         # Log request size for debugging
         import json
+
         body_json = json.dumps(body)
-        body_size_kb = len(body_json.encode('utf-8')) / 1024
-        logger.info(f"Responses API request body size: {body_size_kb:.2f} KB (strict=True)")
+        body_size_kb = len(body_json.encode("utf-8")) / 1024
+        logger.info(
+            f"Responses API request body size: {body_size_kb:.2f} KB (strict=True)"
+        )
 
         if effective_background:
             timeout = timeout or getattr(config, "background_timeout_s", 900)
@@ -169,24 +185,25 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             parsed, metadata = await responses_client.create_with_retry(body)
 
         metadata.setdefault("schema_version", schema.get("$id"))
-        metadata.setdefault("background_mode", "background" if effective_background else "foreground")
-        metadata.setdefault("max_tokens_requested", max_tokens or self.hypothesis_max_tokens)
+        metadata.setdefault(
+            "background_mode", "background" if effective_background else "foreground"
+        )
+        metadata.setdefault(
+            "max_tokens_requested", max_tokens or self.hypothesis_max_tokens
+        )
         if effort:
             metadata.setdefault("reasoning_effort", effort)
         return parsed, metadata
-    
+
     async def search_best_practices(
-        self,
-        failure_type: str,
-        model: str,
-        context: Dict[str, Any]
+        self, failure_type: str, model: str, context: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """Search for relevant best practices using RAG-like approach."""
         logger.info(f"Searching best practices for {failure_type} with model {model}")
-        
+
         # Build search query based on failure type and context
         search_query = self._build_search_query(failure_type, model, context)
-        
+
         prompt = self._build_best_practices_search_prompt(
             search_query,
             failure_type,
@@ -233,14 +250,12 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
                 "response_id": metadata.get("response_id"),
             },
         )
-        
+
         # Enhance with embedded knowledge
         enhanced_practices = self._enhance_with_embedded_knowledge(
-            best_practices, 
-            failure_type, 
-            model
+            best_practices, failure_type, model
         )
-        
+
         return enhanced_practices
 
     async def generate_hypotheses(
@@ -248,15 +263,16 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
         diagnosis: Diagnosis,
         trace: "Trace" = None,
         code_context: CodeContext = None,
-        best_practices: List[Dict[str, Any]] = None
+        best_practices: List[Dict[str, Any]] = None,
     ) -> List[Hypothesis]:
         """Generate hypotheses to fix the issue using multi-strategy approach."""
         logger.info(f"Generating hypotheses for {diagnosis.failure_type}")
-        
+
         # Extract original prompts from trace if provided
         original_prompts = []
         if trace:
             from ..integrations.langsmith_client_simple import create_langsmith_client
+
             langsmith_client = await create_langsmith_client()
             extracted = langsmith_client.extract_prompts_from_trace(trace)
 
@@ -268,9 +284,10 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
                     prompt_text = f"[SYSTEM PROMPT {i}]\n{p}"
                 original_prompts.append(prompt_text)
 
+            logger.info(
+                f"Extracted {len(original_prompts)} prompts from trace with metadata"
+            )
 
-            logger.info(f"Extracted {len(original_prompts)} prompts from trace with metadata")
-        
         # If we have trace prompts, use trace-based generation first
         if trace and original_prompts:
             hypothesis = await self._generate_trace_based_hypothesis(
@@ -278,57 +295,67 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             )
             if hypothesis:
                 return [hypothesis]
-        
+
         # Fallback to original strategy-based approach
         hypotheses = []
-        
+
         if diagnosis.failure_type == FailureType.PROMPT_ISSUE:
             hypotheses.extend(
-                await self._generate_prompt_hypotheses(diagnosis, code_context, best_practices)
+                await self._generate_prompt_hypotheses(
+                    diagnosis, code_context, best_practices
+                )
             )
         elif diagnosis.failure_type == FailureType.CONTEXT_ISSUE:
             hypotheses.extend(
-                await self._generate_context_hypotheses(diagnosis, code_context, best_practices)
+                await self._generate_context_hypotheses(
+                    diagnosis, code_context, best_practices
+                )
             )
         elif diagnosis.failure_type == FailureType.MODEL_LIMITATION:
             hypotheses.extend(
-                await self._generate_model_hypotheses(diagnosis, code_context, best_practices)
+                await self._generate_model_hypotheses(
+                    diagnosis, code_context, best_practices
+                )
             )
         elif diagnosis.failure_type == FailureType.ORCHESTRATION_ISSUE:
             hypotheses.extend(
-                await self._generate_orchestration_hypotheses(diagnosis, code_context, best_practices)
+                await self._generate_orchestration_hypotheses(
+                    diagnosis, code_context, best_practices
+                )
             )
         elif diagnosis.failure_type == FailureType.RETRIEVAL_ISSUE:
             hypotheses.extend(
-                await self._generate_retrieval_hypotheses(diagnosis, code_context, best_practices)
+                await self._generate_retrieval_hypotheses(
+                    diagnosis, code_context, best_practices
+                )
             )
         else:
             # Generic hypothesis generation
             hypotheses.extend(
-                await self._generate_generic_hypotheses(diagnosis, code_context, best_practices)
+                await self._generate_generic_hypotheses(
+                    diagnosis, code_context, best_practices
+                )
             )
-        
+
         # Ensure we have 3-5 hypotheses
         if len(hypotheses) < 3:
             additional = await self._generate_additional_hypotheses(
                 diagnosis, code_context, best_practices, 3 - len(hypotheses)
             )
             hypotheses.extend(additional)
-        
+
         # Limit to top 5
         return hypotheses[:5]
 
     async def rank_hypotheses(
-        self,
-        hypotheses: List[Hypothesis],
-        context: Dict[str, Any]
+        self, hypotheses: List[Hypothesis], context: Dict[str, Any]
     ) -> List[Hypothesis]:
         """Rank hypotheses by likelihood of success and risk assessment."""
         logger.info(f"Ranking {len(hypotheses)} hypotheses")
-        
+
         # Build ranking prompt
         prompt = self._build_ranking_prompt(hypotheses, context)
-        
+
         payload = {
             "stage": "ranking",
             "hypothesis_count": len(hypotheses),
@@ -516,15 +543,17 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
         )
 
         return hypotheses
-    
+
     async def _generate_prompt_hypotheses(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> List[Hypothesis]:
         """Generate hypotheses specifically for prompt issues."""
-        prompt = self._build_prompt_hypothesis_prompt(diagnosis, code_context, best_practices)
+        prompt = self._build_prompt_hypothesis_prompt(
+            diagnosis, code_context, best_practices
+        )
         return await self._run_generation_stage(
             stage_key="prompt",
             system_prompt=PROMPT_HYPOTHESIS_SYSTEM_PROMPT,
@@ -533,15 +562,17 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             diagnosis=diagnosis,
             background=True,
         )
-    
+
     async def _generate_context_hypotheses(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> List[Hypothesis]:
         """Generate hypotheses for context issues."""
-        prompt = self._build_context_hypothesis_prompt(diagnosis, code_context, best_practices)
+        prompt = self._build_context_hypothesis_prompt(
+            diagnosis, code_context, best_practices
+        )
         return await self._run_generation_stage(
             stage_key="context",
             system_prompt=CONTEXT_HYPOTHESIS_SYSTEM_PROMPT,
@@ -550,15 +581,17 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             diagnosis=diagnosis,
             background=True,
         )
-    
+
     async def _generate_model_hypotheses(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> List[Hypothesis]:
         """Generate hypotheses for model limitations."""
-        prompt = self._build_model_hypothesis_prompt(diagnosis, code_context, best_practices)
+        prompt = self._build_model_hypothesis_prompt(
+            diagnosis, code_context, best_practices
+        )
         return await self._run_generation_stage(
             stage_key="model",
             system_prompt=MODEL_HYPOTHESIS_SYSTEM_PROMPT,
@@ -567,15 +600,17 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             diagnosis=diagnosis,
             background=True,
         )
-    
+
     async def _generate_orchestration_hypotheses(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> List[Hypothesis]:
         """Generate hypotheses for orchestration issues."""
-        prompt = self._build_orchestration_hypothesis_prompt(diagnosis, code_context, best_practices)
+        prompt = self._build_orchestration_hypothesis_prompt(
+            diagnosis, code_context, best_practices
+        )
         return await self._run_generation_stage(
             stage_key="orchestration",
             system_prompt=ORCHESTRATION_HYPOTHESIS_SYSTEM_PROMPT,
@@ -584,15 +619,17 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             diagnosis=diagnosis,
             background=True,
         )
-    
+
     async def _generate_retrieval_hypotheses(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> List[Hypothesis]:
         """Generate hypotheses for retrieval issues."""
-        prompt = self._build_retrieval_hypothesis_prompt(diagnosis, code_context, best_practices)
+        prompt = self._build_retrieval_hypothesis_prompt(
+            diagnosis, code_context, best_practices
+        )
         return await self._run_generation_stage(
             stage_key="retrieval",
             system_prompt=RETRIEVAL_HYPOTHESIS_SYSTEM_PROMPT,
@@ -601,15 +638,17 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             diagnosis=diagnosis,
             background=True,
         )
-    
+
     async def _generate_generic_hypotheses(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> List[Hypothesis]:
         """Generate generic hypotheses for any failure type."""
-        prompt = self._build_generic_hypothesis_prompt(diagnosis, code_context, best_practices)
+        prompt = self._build_generic_hypothesis_prompt(
+            diagnosis, code_context, best_practices
+        )
         return await self._run_generation_stage(
             stage_key="generic",
             system_prompt=GENERIC_HYPOTHESIS_SYSTEM_PROMPT,
@@ -618,13 +657,13 @@ class AdvancedHypothesisGenerator(HypothesisGenerator):
             diagnosis=diagnosis,
             background=True,
         )
-    
+
     async def _generate_additional_hypotheses(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
         best_practices: List[Dict[str, Any]],
-        count: int
+        count: int,
     ) -> List[Hypothesis]:
         """Generate additional hypotheses to meet minimum count."""
         prompt = f"""Generate {count} additional hypotheses for this failure:
@@ -643,7 +682,7 @@ Return as JSON array of hypothesis objects."""
             diagnosis=diagnosis,
             background=True,
         )
-    
+
     def _initialize_best_practices(self) -> Dict[str, List[Dict[str, Any]]]:
         """Initialize embedded best practices database."""
         return {
@@ -652,72 +691,67 @@ Return as JSON array of hypothesis objects."""
                     "practice": "Use clear task instructions",
                     "description": "Start prompts with clear, specific task descriptions",
                     "example": "Task: Analyze the sentiment of the following text and return 'positive', 'negative', or 'neutral'.",
-                    "applicable_to": ["all models"]
+                    "applicable_to": ["all models"],
                 },
                 {
                     "practice": "Provide examples (few-shot learning)",
                     "description": "Include 2-3 examples of desired input/output pairs",
                     "example": "Example 1: Input: 'I love this!' Output: 'positive'",
-                    "applicable_to": ["all models"]
+                    "applicable_to": ["all models"],
                 },
                 {
                     "practice": "Use chain-of-thought reasoning",
                     "description": "Ask the model to think step-by-step before answering",
                     "example": "Let's think step by step about this problem...",
-                    "applicable_to": ["gpt-4", "claude", "llama"]
+                    "applicable_to": ["gpt-4", "claude", "llama"],
                 },
                 {
                     "practice": "Specify output format",
                     "description": "Clearly define the expected output structure",
                     "example": "Return your answer as JSON with keys: 'answer', 'confidence', 'reasoning'",
-                    "applicable_to": ["all models"]
-                }
+                    "applicable_to": ["all models"],
+                },
             ],
             "context_management": [
                 {
                     "practice": "Limit context window usage",
                     "description": "Keep prompts concise and relevant to avoid context overflow",
                     "technique": "Summarize long documents before including them",
-                    "applicable_to": ["all models"]
+                    "applicable_to": ["all models"],
                 },
                 {
                     "practice": "Structure context hierarchically",
                     "description": "Put most important information first",
                     "technique": "Use headers and clear sections",
-                    "applicable_to": ["all models"]
-                }
+                    "applicable_to": ["all models"],
+                },
             ],
             "error_handling": [
                 {
                     "practice": "Add validation instructions",
                     "description": "Tell the model to validate its own output",
                     "example": "After generating the response, verify it meets all requirements",
-                    "applicable_to": ["all models"]
+                    "applicable_to": ["all models"],
                 },
                 {
                     "practice": "Handle edge cases explicitly",
                     "description": "Provide instructions for handling edge cases",
                     "example": "If the input is empty or invalid, return an error message",
-                    "applicable_to": ["all models"]
-                }
-            ]
+                    "applicable_to": ["all models"],
+                },
+            ],
         }
-    
+
     def _build_search_query(
-        self, 
-        failure_type: str, 
-        model: str, 
-        context: Dict[str, Any]
+        self, failure_type: str, model: str, context: Dict[str, Any]
     ) -> str:
         """Build a search query for best practices."""
-        return f"{failure_type} {model} {context.get('specific_issue', '')} best practices"
-    
+        return (
+            f"{failure_type} {model} {context.get('specific_issue', '')} best practices"
+        )
+
     def _build_best_practices_search_prompt(
-        self,
-        search_query: str,
-        failure_type: str,
-        model: str,
-        context: Dict[str, Any]
+        self, search_query: str, failure_type: str, model: str, context: Dict[str, Any]
     ) -> str:
         """Build prompt for searching best practices."""
         template = Template(BEST_PRACTICES_SEARCH_TEMPLATE)
@@ -726,130 +760,147 @@ Return as JSON array of hypothesis objects."""
             failure_type=failure_type,
             model=model,
             context=json.dumps(context, indent=2),
-            embedded_practices=json.dumps(self._best_practices_db, indent=2)
+            embedded_practices=json.dumps(self._best_practices_db, indent=2),
         )
-    
+
     def _build_prompt_hypothesis_prompt(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> str:
         """Build prompt for generating prompt-related hypotheses."""
         template = Template(PROMPT_HYPOTHESIS_TEMPLATE)
         return template.render(
             diagnosis=diagnosis,
             code_context=self._format_code_context(code_context),
-            best_practices=json.dumps(self._format_best_practices(best_practices), indent=2),
-            relevant_files=self._format_code_context(code_context)["relevant_files"][:5],
+            best_practices=json.dumps(
+                self._format_best_practices(best_practices), indent=2
+            ),
+            relevant_files=self._format_code_context(code_context)["relevant_files"][
+                :5
+            ],
         )
-    
+
     def _build_context_hypothesis_prompt(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> str:
         """Build prompt for context-related hypotheses."""
         template = Template(CONTEXT_HYPOTHESIS_TEMPLATE)
         return template.render(
             diagnosis=diagnosis,
             code_context=self._format_code_context(code_context),
-            best_practices=json.dumps(self._format_best_practices(best_practices), indent=2)
+            best_practices=json.dumps(
+                self._format_best_practices(best_practices), indent=2
+            ),
         )
-    
+
     def _build_model_hypothesis_prompt(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> str:
         """Build prompt for model limitation hypotheses."""
         template = Template(MODEL_HYPOTHESIS_TEMPLATE)
         return template.render(
             diagnosis=diagnosis,
             code_context=self._format_code_context(code_context),
-            best_practices=json.dumps(self._format_best_practices(best_practices), indent=2)
+            best_practices=json.dumps(
+                self._format_best_practices(best_practices), indent=2
+            ),
         )
-    
+
     def _build_orchestration_hypothesis_prompt(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> str:
         """Build prompt for orchestration hypotheses."""
         template = Template(ORCHESTRATION_HYPOTHESIS_TEMPLATE)
         return template.render(
             diagnosis=diagnosis,
             code_context=self._format_code_context(code_context),
-            best_practices=json.dumps(self._format_best_practices(best_practices), indent=2)
+            best_practices=json.dumps(
+                self._format_best_practices(best_practices), indent=2
+            ),
         )
-    
+
     def _build_retrieval_hypothesis_prompt(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> str:
         """Build prompt for retrieval hypotheses."""
         template = Template(RETRIEVAL_HYPOTHESIS_TEMPLATE)
         return template.render(
             diagnosis=diagnosis,
             code_context=self._format_code_context(code_context),
-            best_practices=json.dumps(self._format_best_practices(best_practices), indent=2)
+            best_practices=json.dumps(
+                self._format_best_practices(best_practices), indent=2
+            ),
         )
-    
+
     def _build_generic_hypothesis_prompt(
         self,
         diagnosis: Diagnosis,
         code_context: CodeContext,
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> str:
         """Build prompt for generic hypotheses."""
         template = Template(GENERIC_HYPOTHESIS_TEMPLATE)
         return template.render(
             diagnosis=diagnosis,
             code_context=self._format_code_context(code_context),
-            best_practices=json.dumps(self._format_best_practices(best_practices), indent=2)
+            best_practices=json.dumps(
+                self._format_best_practices(best_practices), indent=2
+            ),
         )
-    
+
     def _build_ranking_prompt(
-        self,
-        hypotheses: List[Hypothesis],
-        context: Dict[str, Any]
+        self, hypotheses: List[Hypothesis], context: Dict[str, Any]
     ) -> str:
         """Build prompt for ranking hypotheses."""
         template = Template(HYPOTHESIS_RANKING_TEMPLATE)
-        
+
         # Prepare hypothesis data for template
         hyp_data = []
         for hyp in hypotheses:
-            hyp_data.append({
-                "id": hyp.id,
-                "description": hyp.description,
-                "rationale": hyp.rationale,
-                "num_changes": len(hyp.proposed_changes),
-                "risks": hyp.risks,
-                "confidence": hyp.confidence.value
-            })
-        
+            hyp_data.append(
+                {
+                    "id": hyp.id,
+                    "description": hyp.description,
+                    "rationale": hyp.rationale,
+                    "num_changes": len(hyp.proposed_changes),
+                    "risks": hyp.risks,
+                    "confidence": hyp.confidence.value,
+                }
+            )
+
         return template.render(
-            hypotheses=hyp_data,
-            context=json.dumps(context, indent=2)
+            hypotheses=hyp_data, context=json.dumps(context, indent=2)
         )
-    
-    def _parse_best_practices_response(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
+
+    def _parse_best_practices_response(
+        self, response: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         """Parse best practices search response."""
         if not isinstance(response, dict):
-            logger.error("Best practices response must be an object, got %s", type(response))
+            logger.error(
+                "Best practices response must be an object, got %s", type(response)
+            )
             return []
         matches = response.get("matches", [])
         if not isinstance(matches, list):
             logger.error("Best practices matches must be a list, got %s", type(matches))
             return []
         return matches
-    
+
     def _parse_hypothesis_response(
         self,
         response: Dict[str, Any],
@@ -858,7 +909,9 @@ Return as JSON array of hypothesis objects."""
     ) -> List[Hypothesis]:
         """Parse hypothesis generation response."""
         if not isinstance(response, dict):
-            logger.error("Hypothesis response must be an object, got %s", type(response))
+            logger.error(
+                "Hypothesis response must be an object, got %s", type(response)
+            )
             return []
 
         hyp_data = response.get("hypotheses", [])
@@ -886,7 +939,9 @@ Return as JSON array of hypothesis objects."""
                 if not original_content:
                     original_content = next(prompt_iter, "")
                 if not original_content:
-                    original_content = self._load_original_file(change.get("file_path", ""))
+                    original_content = self._load_original_file(
+                        change.get("file_path", "")
+                    )
 
                 changes.append(
                     FileChange(
@@ -903,8 +958,24 @@ Return as JSON array of hypothesis objects."""
             except ValueError:
                 confidence = Confidence.MEDIUM
 
+            # Normalize hypothesis ID to match schema pattern (hyp-NNN)
+            raw_id = data.get("id", "")
+            if raw_id:
+                # Transform formats like "H1", "hyp1", "hypothesis-1" to "hyp-001"
+                import re
+                match = re.search(r'\d+', raw_id)
+                if match:
+                    num = int(match.group())
+                    normalized_id = f"hyp-{num:03d}"
+                else:
+                    # Fallback if no number found: use index + 1
+                    normalized_id = f"hyp-{len(hypotheses) + 1:03d}"
+            else:
+                # Fallback if no ID provided
+                normalized_id = f"hyp-{len(hypotheses) + 1:03d}"
+
             hypothesis = Hypothesis(
-                id=data.get("id", str(uuid.uuid4())),
+                id=normalized_id,
                 description=data.get("description", ""),
                 rationale=data.get("rationale", ""),
                 proposed_changes=changes,
@@ -916,7 +987,7 @@ Return as JSON array of hypothesis objects."""
             hypotheses.append(hypothesis)
 
         return hypotheses
-    
+
     def _parse_ranking_response(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Parse hypothesis ranking response."""
         if not isinstance(response, dict):
@@ -936,36 +1007,35 @@ Return as JSON array of hypothesis objects."""
                 continue
             valid_rankings.append(item)
         return valid_rankings
-    
+
     def _enhance_with_embedded_knowledge(
-        self,
-        practices: List[Dict[str, Any]],
-        failure_type: str,
-        model: str
+        self, practices: List[Dict[str, Any]], failure_type: str, model: str
     ) -> List[Dict[str, Any]]:
         """Enhance search results with embedded best practices."""
         enhanced = practices.copy()
-        
+
         # Add relevant embedded practices based on failure type
         if "prompt" in failure_type.lower():
             for practice in self._best_practices_db.get("prompt_engineering", []):
-                if model in practice.get("applicable_to", []) or "all models" in practice.get("applicable_to", []):
+                if model in practice.get(
+                    "applicable_to", []
+                ) or "all models" in practice.get("applicable_to", []):
                     enhanced.append(practice)
-        
+
         if "context" in failure_type.lower():
             for practice in self._best_practices_db.get("context_management", []):
                 enhanced.append(practice)
-        
+
         # Always add error handling practices
         enhanced.extend(self._best_practices_db.get("error_handling", []))
-        
+
         return enhanced[:10]  # Limit to top 10 practices
-    
+
     async def _generate_trace_based_hypothesis(
         self,
         diagnosis: Diagnosis,
         original_prompts: List[str],
-        best_practices: List[Dict[str, Any]]
+        best_practices: List[Dict[str, Any]],
     ) -> Optional[Hypothesis]:
         """Generate hypothesis by rewriting prompts based on trace analysis and best practices."""
         if not original_prompts:
@@ -982,7 +1052,9 @@ Return as JSON array of hypothesis objects."""
 
         # Log prompt sizes for debugging GPT-5 large context issues
         total_chars = sum(len(p) for p in original_prompts)
-        logger.info(f"Trace-based hypothesis: {len(original_prompts)} prompts, {total_chars:,} total chars, reasoning_effort={self.hypothesis_reasoning_effort}")
+        logger.info(
+            f"Trace-based hypothesis: {len(original_prompts)} prompts, {total_chars:,} total chars, reasoning_effort={self.hypothesis_reasoning_effort}"
+        )
 
         hypotheses = await self._run_generation_stage(
             stage_key="trace",
@@ -995,7 +1067,7 @@ Return as JSON array of hypothesis objects."""
         )
 
         return hypotheses[0] if hypotheses else None
-    
+
     def _get_model_prompting_guide(self, model: str) -> str:
         """Get model-specific prompting guide."""
         # For now, return a basic guide. This can be expanded with actual model guides
@@ -1025,13 +1097,13 @@ General Best Practices:
 - Examples and context
 - Explicit output requirements
 """
-    
+
     def _build_trace_based_hypothesis_prompt(
         self,
         diagnosis: Diagnosis,
         original_prompts: List[str],
         best_practices: List[Dict[str, Any]],
-        model_guide: str
+        model_guide: str,
     ) -> str:
         """Build prompt for generating trace-based hypothesis."""
         return f"""
@@ -1055,7 +1127,7 @@ Output Requirements:
 - Preserve the full updated prompt text in `new_content` for each proposed change.
 - Set `original_content` to an empty string ("") for every change; the system will backfill the existing prompt text after parsing.
 """
-    
+
     def _create_generation_metadata(
         self,
         diagnosis: Diagnosis,
@@ -1072,7 +1144,7 @@ Output Requirements:
             "max_tokens": self.hypothesis_max_tokens,
             "reasoning_effort": self.hypothesis_reasoning_effort,
             "diagnosis_hash": f"sha256:{diagnosis_hash}",
-            "created_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "schema_version": HYPOTHESIS_GENERATION_SCHEMA.get("$id"),
         }
 

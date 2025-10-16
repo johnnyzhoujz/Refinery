@@ -1,3 +1,3 @@
 """Utility functions and helpers."""
 
-from .config import config, RefineryConfig
+from .config import RefineryConfig, config

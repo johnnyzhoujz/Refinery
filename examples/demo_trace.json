@@ -1,0 +1,122 @@
+{
+  "trace_id": "demo-trace-001",
+  "session_id": "demo-project",
+  "project_name": "demo-project",
+  "runs": [
+    {
+      "id": "run-001",
+      "name": "CustomerSupportAgent",
+      "run_type": "chain",
+      "inputs": {
+        "customer_query": "I need to cancel my subscription and get a refund for the last month",
+        "customer_id": "cust_demo_123"
+      },
+      "outputs": {
+        "response": "I can help you with general questions. Please contact billing@example.com for subscription issues."
+      },
+      "start_time": "2025-10-15T10:00:00.000Z",
+      "end_time": "2025-10-15T10:00:15.000Z",
+      "error": null,
+      "parent_run_id": null,
+      "trace_id": "demo-trace-001",
+      "dotted_order": "1",
+      "session_id": "demo-project"
+    },
+    {
+      "id": "run-002",
+      "name": "IntentClassifier",
+      "run_type": "llm",
+      "inputs": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are an intent classifier. Classify the user's intent into one of: [general_inquiry, technical_support, account_issue]"
+          },
+          {
+            "role": "user",
+            "content": "I need to cancel my subscription and get a refund for the last month"
+          }
+        ]
+      },
+      "outputs": {
+        "intent": "general_inquiry",
+        "confidence": 0.65
+      },
+      "start_time": "2025-10-15T10:00:01.000Z",
+      "end_time": "2025-10-15T10:00:03.000Z",
+      "error": null,
+      "parent_run_id": "run-001",
+      "trace_id": "demo-trace-001",
+      "dotted_order": "1.1",
+      "session_id": "demo-project"
+    },
+    {
+      "id": "run-003",
+      "name": "RetrieveKnowledgeBase",
+      "run_type": "retriever",
+      "inputs": {
+        "query": "general inquiry",
+        "intent": "general_inquiry"
+      },
+      "outputs": {
+        "documents": [
+          {
+            "content": "For general questions, please visit our FAQ at https://example.com/faq",
+            "score": 0.72
+          },
+          {
+            "content": "Our support team is available Monday-Friday 9am-5pm EST",
+            "score": 0.68
+          }
+        ]
+      },
+      "start_time": "2025-10-15T10:00:03.500Z",
+      "end_time": "2025-10-15T10:00:05.000Z",
+      "error": null,
+      "parent_run_id": "run-001",
+      "trace_id": "demo-trace-001",
+      "dotted_order": "1.2",
+      "session_id": "demo-project"
+    },
+    {
+      "id": "run-004",
+      "name": "GenerateResponse",
+      "run_type": "llm",
+      "inputs": {
+        "customer_query": "I need to cancel my subscription and get a refund for the last month",
+        "intent": "general_inquiry",
+        "context": "For general questions, please visit our FAQ at https://example.com/faq. Our support team is available Monday-Friday 9am-5pm EST"
+      },
+      "outputs": {
+        "response": "I can help you with general questions. Please contact billing@example.com for subscription issues."
+      },
+      "start_time": "2025-10-15T10:00:05.500Z",
+      "end_time": "2025-10-15T10:00:10.000Z",
+      "error": null,
+      "parent_run_id": "run-001",
+      "trace_id": "demo-trace-001",
+      "dotted_order": "1.3",
+      "session_id": "demo-project"
+    },
+    {
+      "id": "run-005",
+      "name": "ValidateResponse",
+      "run_type": "chain",
+      "inputs": {
+        "response": "I can help you with general questions. Please contact billing@example.com for subscription issues.",
+        "customer_query": "I need to cancel my subscription and get a refund for the last month"
+      },
+      "outputs": {
+        "is_valid": false,
+        "reason": "Response does not address subscription cancellation or refund request"
+      },
+      "start_time": "2025-10-15T10:00:10.500Z",
+      "end_time": "2025-10-15T10:00:12.000Z",
+      "error": "Validation failed: Response marked as inadequate for billing/subscription query",
+      "parent_run_id": "run-001",
+      "trace_id": "demo-trace-001",
+      "dotted_order": "1.4",
+      "session_id": "demo-project"
+    }
+  ]
+}

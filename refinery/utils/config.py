@@ -1,8 +1,9 @@
 """Configuration management for Refinery."""
 
 import os
-from typing import Optional
 from dataclasses import dataclass
+from typing import Optional
+
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -12,32 +13,38 @@ load_dotenv()
 @dataclass
 class ChunkedAnalysisConfig:
     """Configuration for chunked analysis to handle large traces."""
-    
+
     # Core chunking parameters
     group_size_runs: int = 6  # Number of runs per group for chunked analysis
     chunking_threshold: int = 20  # Use chunking for traces with >20 runs
-    
+
     # Token management
     max_num_results_stage1: int = 2  # File search results for Stage 1 chunks
     max_num_results_other: int = 3  # File search results for Stages 2-3
-    max_output_tokens_stage1: int = 16000  # Output tokens for Stage 1 chunks (GPT-5 reasoning needs 16k for complex analysis)
-    max_output_tokens_other: int = 8000   # Output tokens for Stages 2-3 (GPT-5 reasoning needs 8k+)
-    
+    max_output_tokens_stage1: int = (
+        16000  # Output tokens for Stage 1 chunks (GPT-5 reasoning needs 16k for complex analysis)
+    )
+    max_output_tokens_other: int = (
+        8000  # Output tokens for Stages 2-3 (GPT-5 reasoning needs 8k+)
+    )
+
     # Rate limiting
     inter_group_sleep_s: int = 6  # Seconds between group calls (tuneable)
-    background_timeout_s: int = 900  # Minimum background polling timeout per chunk (increased for GPT-5 reasoning)
+    background_timeout_s: int = (
+        900  # Minimum background polling timeout per chunk (increased for GPT-5 reasoning)
+    )
     tpm_limit: int = 30000  # TPM limit for rate limiting
     tpm_buffer: int = 2000  # Buffer below TPM limit
-    
+
     # Model settings
     temperature: float = 0.2  # Low temperature for consistency
 
     # Reasoning model adjustments
     reasoning_group_size_cap: int = 1  # Max runs per chunk when using reasoning models
-    
+
     # Feature flags
     disable_chunking: bool = False  # Emergency disable flag
-    
+
     @classmethod
     def from_env(cls) -> "ChunkedAnalysisConfig":
         """Load chunked analysis configuration from environment variables."""
@@ -46,7 +53,9 @@ class ChunkedAnalysisConfig:
             chunking_threshold=int(os.getenv("CHUNKING_THRESHOLD", "20")),
             max_num_results_stage1=int(os.getenv("MAX_NUM_RESULTS_STAGE1", "2")),
             max_num_results_other=int(os.getenv("MAX_NUM_RESULTS_OTHER", "3")),
-            max_output_tokens_stage1=int(os.getenv("MAX_OUTPUT_TOKENS_STAGE1", "16000")),
+            max_output_tokens_stage1=int(
+                os.getenv("MAX_OUTPUT_TOKENS_STAGE1", "16000")
+            ),
             max_output_tokens_other=int(os.getenv("MAX_OUTPUT_TOKENS_OTHER", "8000")),
             inter_group_sleep_s=int(os.getenv("INTER_GROUP_SLEEP_S", "6")),
             background_timeout_s=int(os.getenv("BACKGROUND_TIMEOUT_S", "900")),
@@ -54,67 +63,72 @@ class ChunkedAnalysisConfig:
             tpm_buffer=int(os.getenv("TPM_BUFFER", "2000")),
             temperature=float(os.getenv("TEMPERATURE", "0.2")),
             reasoning_group_size_cap=int(os.getenv("REASONING_GROUP_SIZE_CAP", "4")),
-            disable_chunking=os.getenv("REFINERY_DISABLE_CHUNKING", "false").lower() == "true"
+            disable_chunking=os.getenv("REFINERY_DISABLE_CHUNKING", "false").lower()
+            == "true",
         )
 
 
 @dataclass
 class RefineryConfig:
     """Configuration settings for Refinery."""
-    
+
     # LangSmith
     langsmith_api_key: str
     langsmith_api_url: str = "https://api.smith.langchain.com"
-    
+
     # LLM Configuration
     llm_provider: str = "openai"  # openai, anthropic, azure_openai, gemini
-    
+
     # OpenAI
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o"
-    
+
     # Anthropic
     anthropic_api_key: Optional[str] = None
     anthropic_model: str = "claude-3-opus-20240229"
-    
+
     # Azure OpenAI
     azure_openai_api_key: Optional[str] = None
     azure_openai_endpoint: Optional[str] = None
     azure_openai_deployment: Optional[str] = None
-    
+
     # Gemini
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-2.0-flash"
-    
+
     # General settings
     log_level: str = "INFO"
     debug: bool = False
     cache_ttl: int = 900  # seconds
-    
+
     # Hypothesis generation settings (for customer experiments)
     hypothesis_llm_provider: str = "openai"
     hypothesis_model: str = "gpt-5"  # GPT-5 exists as of Sept 2025
     hypothesis_temperature: float = 0.0  # Deterministic generation
     hypothesis_max_tokens: int = 16000  # Match trace analysis token limits for GPT-5
-    hypothesis_reasoning_effort: str = "medium"  # Use "medium" for better quality with fewer retries
+    hypothesis_reasoning_effort: str = (
+        "medium"  # Use "medium" for better quality with fewer retries
+    )
 
     # Analysis determinism settings
     analysis_seed: Optional[int] = None
-    
+
     # Safety settings
     max_file_size_kb: int = 1000
     max_changes_per_hypothesis: int = 10
     require_approval_for_changes: bool = True
-    
+
     # Chunked analysis configuration
     chunked_analysis: ChunkedAnalysisConfig = None
-    
+
     @classmethod
     def from_env(cls) -> "RefineryConfig":
         """Load configuration from environment variables."""
         return cls(
             langsmith_api_key=os.getenv("LANGSMITH_API_KEY", ""),
-            langsmith_api_url=os.getenv("LANGSMITH_API_URL", "https://api.smith.langchain.com"),
+            langsmith_api_url=os.getenv(
+                "LANGSMITH_API_URL", "https://api.smith.langchain.com"
+            ),
             llm_provider=os.getenv("LLM_PROVIDER", "openai"),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4o"),
@@ -132,45 +146,43 @@ class RefineryConfig:
             hypothesis_model=os.getenv("HYPOTHESIS_MODEL", "gpt-5"),
             hypothesis_temperature=float(os.getenv("HYPOTHESIS_TEMPERATURE", "0.0")),
             hypothesis_max_tokens=int(os.getenv("HYPOTHESIS_MAX_TOKENS", "16000")),
-            hypothesis_reasoning_effort=os.getenv("HYPOTHESIS_REASONING_EFFORT", "medium"),
-            analysis_seed=int(os.getenv("ANALYSIS_SEED")) if os.getenv("ANALYSIS_SEED") else None,
+            hypothesis_reasoning_effort=os.getenv(
+                "HYPOTHESIS_REASONING_EFFORT", "medium"
+            ),
+            analysis_seed=(
+                int(os.getenv("ANALYSIS_SEED")) if os.getenv("ANALYSIS_SEED") else None
+            ),
             max_file_size_kb=int(os.getenv("MAX_FILE_SIZE_KB", "1000")),
-            max_changes_per_hypothesis=int(os.getenv("MAX_CHANGES_PER_HYPOTHESIS", "10")),
-            require_approval_for_changes=os.getenv("REQUIRE_APPROVAL_FOR_CHANGES", "true").lower() == "true",
-            chunked_analysis=ChunkedAnalysisConfig.from_env()
+            max_changes_per_hypothesis=int(
+                os.getenv("MAX_CHANGES_PER_HYPOTHESIS", "10")
+            ),
+            require_approval_for_changes=os.getenv(
+                "REQUIRE_APPROVAL_FOR_CHANGES", "true"
+            ).lower()
+            == "true",
+            chunked_analysis=ChunkedAnalysisConfig.from_env(),
         )
-    
-    def validate(self) -> None:
-        """Validate configuration."""
+
+    def validate_langsmith(self) -> None:
+        """Validate LangSmith configuration (required for API trace fetching)."""
         if not self.langsmith_api_key:
-            raise ValueError("LANGSMITH_API_KEY is required")
-        
+            raise ValueError(
+                "LANGSMITH_API_KEY is required for fetching traces from LangSmith API.\n"
+                "To analyze local trace files instead, use: refinery chat --trace-file <file>"
+            )
+
+    def validate_openai(self) -> None:
+        """Validate OpenAI configuration (required for analysis)."""
         if self.llm_provider == "openai" and not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required when using OpenAI provider")
-        
-        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
-            raise ValueError("ANTHROPIC_API_KEY is required when using Anthropic provider")
-        
-        if self.llm_provider == "azure_openai":
-            if not all([self.azure_openai_api_key, self.azure_openai_endpoint, self.azure_openai_deployment]):
-                raise ValueError("Azure OpenAI requires API key, endpoint, and deployment")
-        
-        if self.llm_provider == "gemini" and not self.gemini_api_key:
-            raise ValueError("GEMINI_API_KEY is required when using Gemini provider")
-        
-        # Validate hypothesis-specific LLM settings
+
+        # Validate hypothesis-specific OpenAI settings
         if self.hypothesis_llm_provider == "openai" and not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required for hypothesis generation")
-        
-        if self.hypothesis_llm_provider == "anthropic" and not self.anthropic_api_key:
-            raise ValueError("ANTHROPIC_API_KEY is required for hypothesis generation")
-        
-        if self.hypothesis_llm_provider == "gemini" and not self.gemini_api_key:
-            raise ValueError("GEMINI_API_KEY is required for hypothesis generation")
-        
+
         if self.hypothesis_temperature < 0.0 or self.hypothesis_temperature > 2.0:
             raise ValueError("hypothesis_temperature must be between 0.0 and 2.0")
-        
+
         if self.hypothesis_max_tokens < 100 or self.hypothesis_max_tokens > 16000:
             raise ValueError("hypothesis_max_tokens must be between 100 and 16000")
 
@@ -179,6 +191,46 @@ class RefineryConfig:
             raise ValueError(
                 f"hypothesis_reasoning_effort must be one of {sorted(allowed_efforts)}"
             )
+
+    def validate_anthropic(self) -> None:
+        """Validate Anthropic configuration."""
+        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY is required when using Anthropic provider"
+            )
+
+        if self.hypothesis_llm_provider == "anthropic" and not self.anthropic_api_key:
+            raise ValueError("ANTHROPIC_API_KEY is required for hypothesis generation")
+
+    def validate_azure_openai(self) -> None:
+        """Validate Azure OpenAI configuration."""
+        if self.llm_provider == "azure_openai":
+            if not all(
+                [
+                    self.azure_openai_api_key,
+                    self.azure_openai_endpoint,
+                    self.azure_openai_deployment,
+                ]
+            ):
+                raise ValueError(
+                    "Azure OpenAI requires API key, endpoint, and deployment"
+                )
+
+    def validate_gemini(self) -> None:
+        """Validate Gemini configuration."""
+        if self.llm_provider == "gemini" and not self.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY is required when using Gemini provider")
+
+        if self.hypothesis_llm_provider == "gemini" and not self.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY is required for hypothesis generation")
+
+    def validate(self) -> None:
+        """Validate all configuration (legacy method - prefer specific validators)."""
+        self.validate_langsmith()
+        self.validate_openai()
+        self.validate_anthropic()
+        self.validate_azure_openai()
+        self.validate_gemini()
 
 
 # Global config instance

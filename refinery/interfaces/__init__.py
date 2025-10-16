@@ -7,7 +7,7 @@ This package provides abstraction layers for various user interfaces:
 - Future: Web interface (Streamlit/FastAPI)
 """
 
-from .chat_interface import ChatInterface, BaseChatInterface
+from .chat_interface import BaseChatInterface, ChatInterface
 from .chat_session import run_chat_session
 
 __all__ = ["ChatInterface", "BaseChatInterface", "run_chat_session"]

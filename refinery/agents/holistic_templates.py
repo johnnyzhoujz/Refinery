@@ -12,18 +12,21 @@ HOLISTIC_ANALYSIS_SCHEMA = {
             "additionalProperties": False,
             "properties": {
                 "execution_summary": {"type": "string"},
-                "key_issues": {"type": "array", "items": {"type": "string"}}
+                "key_issues": {"type": "array", "items": {"type": "string"}},
             },
-            "required": ["execution_summary", "key_issues"]
+            "required": ["execution_summary", "key_issues"],
         },
         "gap_analysis": {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "behavioral_differences": {"type": "array", "items": {"type": "string"}},
-                "missing_context": {"type": "array", "items": {"type": "string"}}
+                "behavioral_differences": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "missing_context": {"type": "array", "items": {"type": "string"}},
             },
-            "required": ["behavioral_differences", "missing_context"]
+            "required": ["behavioral_differences", "missing_context"],
         },
         "diagnosis": {
             "type": "object",
@@ -31,13 +34,13 @@ HOLISTIC_ANALYSIS_SCHEMA = {
             "properties": {
                 "failure_type": {"type": "string"},
                 "root_cause": {"type": "string"},
-                "confidence": {"type": "string", "enum": ["high", "medium", "low"]}
+                "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
             },
-            "required": ["failure_type", "root_cause", "confidence"]
+            "required": ["failure_type", "root_cause", "confidence"],
         },
-        "executive_summary": {"type": "string"}
+        "executive_summary": {"type": "string"},
     },
-    "required": ["trace_analysis", "gap_analysis", "diagnosis", "executive_summary"]
+    "required": ["trace_analysis", "gap_analysis", "diagnosis", "executive_summary"],
 }
 
 
@@ -65,7 +68,7 @@ The complete trace data with ALL runs (no truncation) and agent context files is
 
 Analyze the execution trace systematically:
 1. Map the execution flow - what was the agent trying to accomplish?
-2. For each step, analyze what context was available vs needed  
+2. For each step, analyze what context was available vs needed
 3. Track data transformations - how did inputs become outputs?
 4. If there were errors, trace how they propagated
 5. Identify any issues or anomalies in execution
@@ -92,7 +95,7 @@ Use the attached file data to inform all sections. The file contains:
 - Complete trace metadata
 - ALL execution runs with full inputs/outputs (no truncation)
 - Agent prompt files (if provided)
-- Agent evaluation files (if provided) 
+- Agent evaluation files (if provided)
 - Expectation details
 
 === OUTPUT REQUIREMENTS ===

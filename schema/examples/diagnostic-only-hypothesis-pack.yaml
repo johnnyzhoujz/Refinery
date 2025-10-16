@@ -1,0 +1,49 @@
+$schema: "https://refinery.ai/schemas/hypothesis-pack/v1"
+version: "1.0.0"
+
+metadata:
+  trace_id: "edge-case-001"
+  project: "test-project"
+  analyzed_at: "2025-10-15T15:00:00.000Z"
+  refinery_version: "0.1.0"
+  analysis_model: "gpt-5-preview"
+  hypothesis_model: "gpt-5-preview"
+  confidence_methodology: "evidence-based-ranking"
+  total_analysis_time_ms: 8200
+
+findings:
+  - type: "error"
+    description: "External API timeout caused chain failure"
+    evidence:
+      - "HTTP request to billing-api.example.com timed out after 30s"
+      - "No retry logic configured for billing API calls"
+      - "Error: 'requests.exceptions.Timeout: HTTPSConnectionPool'"
+    severity: "critical"
+    affected_components:
+      - "BillingAPIClient"
+
+hypotheses:
+  - id: "hyp-001"
+    description: "Infrastructure issue: external API timeout (non-code fix required)"
+    rationale: "The root cause is an infrastructure/network issue, not a prompt or code problem. The billing API is unresponsive or experiencing high latency. This requires investigation of the external service, not code changes to the agent."
+    confidence: "high"
+    risks:
+      - "None (diagnostic-only hypothesis)"
+    proposed_changes: []
+    example_before: "BillingAPIClient.get_subscription(user_id) → Timeout after 30s"
+    example_after: "BillingAPIClient (with healthy API) → Response in <2s"
+    generation_metadata:
+      model: "gpt-5-preview"
+      reasoning_effort: "medium"
+      diagnosis_hash: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+      created_at: "2025-10-15T15:00:00.000Z"
+      attempts: 1
+
+reproducibility:
+  seed: null
+  model_params:
+    temperature: 0.0
+  diagnosis_hash: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+  refinery_config:
+    analysis_model: "gpt-5-preview"
+    hypothesis_model: "gpt-5-preview"

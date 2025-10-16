@@ -9,7 +9,6 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-import openai
 from anthropic import AsyncAnthropic
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 
@@ -126,12 +125,14 @@ class ConfigurableLLMProvider(LLMProvider):
         try:
             response = await asyncio.wait_for(
                 self._client.chat.completions.create(**kwargs),
-                timeout=120.0  # 2 minute timeout
+                timeout=120.0,  # 2 minute timeout
             )
             return response.choices[0].message.content
         except asyncio.TimeoutError:
-            logger.error(f"GPT-5 request timed out after 2 minutes")
-            raise Exception("Request timed out after 2 minutes - prompt may be too long")
+            logger.error("GPT-5 request timed out after 2 minutes")
+            raise Exception(
+                "Request timed out after 2 minutes - prompt may be too long"
+            )
 
     async def _anthropic_complete(
         self,
@@ -147,10 +148,10 @@ class ConfigurableLLMProvider(LLMProvider):
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
         }
-        
+
         if system_prompt:
             kwargs["system"] = system_prompt
-        
+
         if max_tokens:
             kwargs["max_tokens"] = max_tokens
         else:
@@ -185,11 +186,13 @@ class ConfigurableLLMProvider(LLMProvider):
 
         if response.choices[0].message.tool_calls:
             for tool_call in response.choices[0].message.tool_calls:
-                result["tool_calls"].append({
-                    "id": tool_call.id,
-                    "function": tool_call.function.name,
-                    "arguments": json.loads(tool_call.function.arguments),
-                })
+                result["tool_calls"].append(
+                    {
+                        "id": tool_call.id,
+                        "function": tool_call.function.name,
+                        "arguments": json.loads(tool_call.function.arguments),
+                    }
+                )
 
         return result
 
@@ -206,7 +209,7 @@ class ConfigurableLLMProvider(LLMProvider):
             "max_tokens": 4096,
             "tools": tools,
         }
-        
+
         if system_prompt:
             kwargs["system"] = system_prompt
 
@@ -221,11 +224,13 @@ class ConfigurableLLMProvider(LLMProvider):
             if content_block.type == "text":
                 result["content"] += content_block.text
             elif content_block.type == "tool_use":
-                result["tool_calls"].append({
-                    "id": content_block.id,
-                    "function": content_block.name,
-                    "arguments": content_block.input,
-                })
+                result["tool_calls"].append(
+                    {
+                        "id": content_block.id,
+                        "function": content_block.name,
+                        "arguments": content_block.input,
+                    }
+                )
 
         return result
 
@@ -234,6 +239,7 @@ def get_llm_provider(config: Optional[RefineryConfig] = None) -> LLMProvider:
     """Get a configured LLM provider instance."""
     if config is None:
         from .config import config as default_config
+
         config = default_config
-    
+
     return ConfigurableLLMProvider(config)

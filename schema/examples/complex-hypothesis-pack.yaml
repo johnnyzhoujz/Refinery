@@ -1,0 +1,192 @@
+$schema: "https://refinery.ai/schemas/hypothesis-pack/v1"
+version: "1.0.0"
+
+metadata:
+  trace_id: "b9e570b7-007d-4e10-afea-42f351a5e9f0"
+  project: "production-agent"
+  analyzed_at: "2025-10-15T14:45:32.123Z"
+  refinery_version: "0.1.0"
+  analysis_model: "gpt-5-preview"
+  hypothesis_model: "gpt-5-preview"
+  confidence_methodology: "evidence-based-ranking"
+  total_analysis_time_ms: 45230
+
+findings:
+  - type: "gap"
+    description: "Intent classifier lacks training data for billing/subscription queries"
+    evidence:
+      - "Query contains billing keywords: 'cancel', 'subscription', 'refund'"
+      - "Classifier output: 'general_inquiry' with confidence 0.65 (threshold: 0.80)"
+      - "No billing examples in few-shot context"
+    severity: "critical"
+    affected_components:
+      - "IntentClassifier"
+
+  - type: "error"
+    description: "Knowledge base retrieval returned irrelevant documents"
+    evidence:
+      - "Query: 'general inquiry' → Retrieved: 'FAQ link', 'support hours'"
+      - "No billing policy documents retrieved"
+      - "Retrieval scores: 0.72, 0.68 (below threshold: 0.75)"
+    severity: "high"
+    affected_components:
+      - "RetrieveKnowledgeBase"
+
+  - type: "inefficiency"
+    description: "Response generator defaulted to generic fallback instead of specialized handler"
+    evidence:
+      - "Intent: 'general_inquiry' → Used generic response template"
+      - "Billing-specific handler was never invoked"
+      - "Response time: 4.5s (expected: <2s for billing queries)"
+    severity: "medium"
+    affected_components:
+      - "GenerateResponse"
+      - "BillingHandler"
+
+hypotheses:
+  - id: "hyp-001"
+    description: "Add billing intent category and few-shot examples to classifier"
+    rationale: "Root cause is missing billing intent in classifier taxonomy. Adding few-shot examples will enable proper classification of billing/subscription queries, which will route to correct downstream handlers."
+    confidence: "high"
+    risks:
+      - "Increases prompt token usage by ~200 tokens"
+      - "May require rebalancing other intent categories if billing was previously captured by 'account_issue'"
+    proposed_changes:
+      - file_path: "prompts/intent_classifier/system.txt"
+        change_type: "prompt_modification"
+        description: "Add billing_inquiry intent and few-shot examples"
+        original_content: |
+          You are an intent classifier. Classify the user's intent into one of:
+          [general_inquiry, technical_support, account_issue]
+        new_content: |
+          You are an intent classifier. Classify the user's intent into one of:
+          [general_inquiry, technical_support, billing_inquiry, account_issue]
+
+          Examples:
+          - 'cancel my subscription' → billing_inquiry
+          - 'request a refund for last month' → billing_inquiry
+          - 'update my payment method' → billing_inquiry
+          - 'change my plan' → billing_inquiry
+        diff: |
+          --- prompts/intent_classifier/system.txt
+          +++ prompts/intent_classifier/system.txt
+          @@ -1,2 +1,8 @@
+           You are an intent classifier. Classify the user's intent into one of:
+          -[general_inquiry, technical_support, account_issue]
+          +[general_inquiry, technical_support, billing_inquiry, account_issue]
+          +
+          +Examples:
+          +- 'cancel my subscription' → billing_inquiry
+          +- 'request a refund for last month' → billing_inquiry
+          +- 'update my payment method' → billing_inquiry
+          +- 'change my plan' → billing_inquiry
+    example_before: "User: 'cancel subscription' → 'general_inquiry' → generic response"
+    example_after: "User: 'cancel subscription' → 'billing_inquiry' → billing handler invoked"
+    generation_metadata:
+      model: "gpt-5-preview"
+      reasoning_effort: "high"
+      diagnosis_hash: "sha256:abc123def456789012345678901234567890123456789012345678901234abcd"
+      created_at: "2025-10-15T14:45:25.000Z"
+      attempts: 1
+
+  - id: "hyp-002"
+    description: "Add billing document embeddings to knowledge base retrieval"
+    rationale: "Secondary issue is missing billing policy documents in knowledge base. Even if classification improves, retrieval will fail without relevant documents. Adding billing policy docs will improve retrieval relevance."
+    confidence: "medium"
+    risks:
+      - "Requires embedding generation for billing docs (~1000 chunks)"
+      - "May increase retrieval latency by 50-100ms"
+      - "Depends on availability of billing policy documentation"
+    proposed_changes:
+      - file_path: "config/knowledge_base/document_sources.yaml"
+        change_type: "config_change"
+        description: "Add billing policy documents to knowledge base"
+        original_content: |
+          document_sources:
+            - name: "general_faq"
+              path: "docs/faq.md"
+            - name: "technical_docs"
+              path: "docs/technical/"
+        new_content: |
+          document_sources:
+            - name: "general_faq"
+              path: "docs/faq.md"
+            - name: "technical_docs"
+              path: "docs/technical/"
+            - name: "billing_policies"
+              path: "docs/billing/"
+              metadata:
+                category: "billing"
+                priority: "high"
+        diff: |
+          --- config/knowledge_base/document_sources.yaml
+          +++ config/knowledge_base/document_sources.yaml
+          @@ -4,3 +4,7 @@
+               path: "docs/faq.md"
+             - name: "technical_docs"
+               path: "docs/technical/"
+          +  - name: "billing_policies"
+          +    path: "docs/billing/"
+          +    metadata:
+          +      category: "billing"
+          +      priority: "high"
+    example_before: "Query: 'billing' → Retrieved: 'FAQ link' (score: 0.72)"
+    example_after: "Query: 'billing' → Retrieved: 'cancellation policy' (score: 0.89)"
+    generation_metadata:
+      model: "gpt-5-preview"
+      reasoning_effort: "high"
+      diagnosis_hash: "sha256:abc123def456789012345678901234567890123456789012345678901234abcd"
+      created_at: "2025-10-15T14:45:28.000Z"
+      attempts: 1
+
+  - id: "hyp-003"
+    description: "Update orchestration to route billing_inquiry to specialized handler"
+    rationale: "Once classification is fixed, orchestration logic needs to route billing queries to the BillingHandler instead of the generic response generator. This ensures faster, more accurate responses."
+    confidence: "high"
+    risks:
+      - "Requires BillingHandler to be deployed and tested"
+      - "May need fallback logic if BillingHandler is unavailable"
+    proposed_changes:
+      - file_path: "orchestration/routing.yaml"
+        change_type: "orchestration_suggestion"
+        description: "Add billing_inquiry routing rule to BillingHandler"
+        original_content: |
+          routing_rules:
+            general_inquiry: GeneralHandler
+            technical_support: TechnicalHandler
+            account_issue: AccountHandler
+        new_content: |
+          routing_rules:
+            general_inquiry: GeneralHandler
+            technical_support: TechnicalHandler
+            billing_inquiry: BillingHandler
+            account_issue: AccountHandler
+        diff: |
+          --- orchestration/routing.yaml
+          +++ orchestration/routing.yaml
+          @@ -2,4 +2,5 @@
+           routing_rules:
+             general_inquiry: GeneralHandler
+             technical_support: TechnicalHandler
+          +  billing_inquiry: BillingHandler
+             account_issue: AccountHandler
+    example_before: "billing_inquiry → GeneralHandler (4.5s latency)"
+    example_after: "billing_inquiry → BillingHandler (1.8s latency)"
+    generation_metadata:
+      model: "gpt-5-preview"
+      reasoning_effort: "high"
+      diagnosis_hash: "sha256:abc123def456789012345678901234567890123456789012345678901234abcd"
+      created_at: "2025-10-15T14:45:30.000Z"
+      attempts: 1
+
+reproducibility:
+  seed: null
+  model_params:
+    temperature: 0.0
+    top_p: 1.0
+  diagnosis_hash: "sha256:abc123def456789012345678901234567890123456789012345678901234abcd"
+  refinery_config:
+    analysis_model: "gpt-5-preview"
+    hypothesis_model: "gpt-5-preview"
+    hypothesis_reasoning_effort: "high"
+    hypothesis_max_tokens: 32000

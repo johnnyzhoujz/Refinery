@@ -78,3 +78,16 @@ Thumbs.db
 *.log
 .refinery/
 refinery_context.json
+.streamlit/
+
+# Test outputs and validation scripts
+hypothesis.json
+hypothesis.yaml
+validate_json_schema.py
+schema-design.md
+
+# Sprint documentation (not for release)
+DAY3_INTEGRATION_REPORT.md
+DOCUMENTATION_DELIVERABLES.md
+LAUNCH_STRATEGY.md
+SCHEMA_HANDOFF.md

@@ -3,19 +3,18 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "refinery"
+name = "refinery-cli"
 version = "0.1.0"
-description = "AI-powered development platform for domain expert empowerment"
+description = "AI-powered trace analysis and prompt fixes for LangSmith"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Refinery Team", email = "team@refinery.ai"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -56,6 +55,9 @@ dev = [
 
 [project.scripts]
 refinery = "refinery.cli:main"
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
