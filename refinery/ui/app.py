@@ -313,6 +313,27 @@ if st.session_state.get("hypothesis"):
 
     hypothesis = st.session_state.hypothesis
 
+    # Show behavior examples if available
+    if hypothesis.example_before or hypothesis.example_after:
+        st.markdown("#### 🔄 Behavior Change")
+        ex_col1, ex_col2 = st.columns(2)
+
+        with ex_col1:
+            st.markdown("**📉 Current Behavior**")
+            if hypothesis.example_before:
+                st.info(hypothesis.example_before)
+            else:
+                st.caption("_No example provided_")
+
+        with ex_col2:
+            st.markdown("**📈 Expected Behavior**")
+            if hypothesis.example_after:
+                st.success(hypothesis.example_after)
+            else:
+                st.caption("_No example provided_")
+
+        st.markdown("")  # Add spacing
+
     # Before/after comparison with proper debugging
     col1, col2 = st.columns(2)
 

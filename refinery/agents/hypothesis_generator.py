@@ -1231,8 +1231,8 @@ HYPOTHESIS_GENERATION_SCHEMA: Dict[str, Any] = {
                 ],
                 "properties": {
                     "id": {"type": "string"},
-                    "description": {"type": "string"},
-                    "rationale": {"type": "string"},
+                    "description": {"type": "string", "maxLength": 200},
+                    "rationale": {"type": "string", "maxLength": 1000},
                     "confidence": {
                         "type": "string",
                         "enum": [c.value for c in Confidence],
@@ -1241,8 +1241,8 @@ HYPOTHESIS_GENERATION_SCHEMA: Dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string"},
                     },
-                    "example_before": {"type": "string"},
-                    "example_after": {"type": "string"},
+                    "example_before": {"type": "string", "maxLength": 500},
+                    "example_after": {"type": "string", "maxLength": 500},
                     "proposed_changes": {
                         "type": "array",
                         "items": {
@@ -1256,8 +1256,8 @@ HYPOTHESIS_GENERATION_SCHEMA: Dict[str, Any] = {
                                 "original_content",
                             ],
                             "properties": {
-                                "file_path": {"type": "string"},
-                                "description": {"type": "string"},
+                                "file_path": {"type": "string", "pattern": r"^(prompts|config|orchestration|tests|evals)/.*"},
+                                "description": {"type": "string", "maxLength": 200},
                                 "original_content": {"type": "string"},
                                 "new_content": {"type": "string"},
                                 "change_type": {

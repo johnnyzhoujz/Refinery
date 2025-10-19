@@ -50,6 +50,18 @@ def main(debug: bool, config_file: str):
     help="Local trace JSON file to analyze",
 )
 @click.option(
+    "--prompts",
+    help="Path or glob pattern to prompt files (e.g., './prompts/*.txt')",
+)
+@click.option(
+    "--evals",
+    help="Path or glob pattern to eval/test files (e.g., './tests/*.py')",
+)
+@click.option(
+    "--expected-behavior",
+    help="Description of expected agent behavior",
+)
+@click.option(
     "--out", type=click.Path(), help="Output file for hypothesis pack (YAML/JSON)"
 )
 @click.option(
@@ -66,6 +78,9 @@ def chat(
     trace_id: str,
     project: str,
     trace_file: str,
+    prompts: str,
+    evals: str,
+    expected_behavior: str,
     out: str,
     output_format: str,
     codebase: str,
@@ -77,15 +92,21 @@ def chat(
         from .integrations.trace_sources import LangSmithAPISource, LocalFileSource
         from .interfaces.chat_interface import ChatInterface
         from .interfaces.chat_session import run_chat_session
+        from .utils.file_helpers import load_files_from_path
 
         # Validate: must provide one trace source
         if not trace_id and not trace_file:
             console.print(
                 "[red]Error: Must provide either --trace-id or --trace-file[/red]"
             )
-            console.print("\nExamples:")
-            console.print("  refinery chat --trace-file examples/demo_trace.json")
-            console.print("  refinery chat --trace-id abc123 --project my-project")
+            console.print("\n[bold]Choose your workflow:[/bold]")
+            console.print("\n[cyan]1. LangSmith (native integration):[/cyan]")
+            console.print("   refinery chat --trace-id abc123 --project my-project")
+            console.print("   [dim]Requires: LANGSMITH_API_KEY and OPENAI_API_KEY[/dim]")
+            console.print("\n[cyan]2. Local JSON file (any trace format):[/cyan]")
+            console.print("   refinery chat --trace-file trace.json --prompts ./prompts/ --evals ./tests/")
+            console.print("   [dim]Requires: OPENAI_API_KEY only[/dim]")
+            console.print("   [dim]Supports: LangSmith, OpenTelemetry, Langfuse, custom JSON[/dim]")
             sys.exit(1)
 
         if trace_id and trace_file:
@@ -93,6 +114,17 @@ def chat(
                 "[red]Error: Cannot provide both --trace-id and --trace-file[/red]"
             )
             sys.exit(1)
+
+        # Warn if using trace file without explicit prompts/evals
+        if trace_file and not prompts:
+            console.print(
+                "[yellow]Warning: No --prompts provided. Analysis may be limited without prompt context.[/yellow]"
+            )
+
+        if trace_file and not evals:
+            console.print(
+                "[yellow]Warning: No --evals provided. Analysis will proceed without eval context.[/yellow]"
+            )
 
         # Lazy validation based on workflow
         try:
@@ -143,11 +175,28 @@ def chat(
             # Inject trace into orchestrator's cache to bypass LangSmith fetch
             orchestrator._trace_cache[trace.trace_id] = trace
 
-            # Define expected behavior for the demo trace
-            expected_behavior = (
-                "Agent should correctly classify billing/subscription queries and route to appropriate handlers, "
-                "providing accurate responses about cancellations and refunds."
-            )
+            # Load prompts and evals if provided
+            prompt_contents = None
+            eval_contents = None
+
+            if prompts:
+                console.print(f"[cyan]Loading prompts from: {prompts}[/cyan]")
+                prompt_contents = load_files_from_path(prompts)
+                console.print(f"[green]✓ Loaded {len(prompt_contents)} prompt file(s)[/green]")
+
+            if evals:
+                console.print(f"[cyan]Loading evals from: {evals}[/cyan]")
+                eval_contents = load_files_from_path(evals)
+                console.print(f"[green]✓ Loaded {len(eval_contents)} eval file(s)[/green]")
+
+            # Define expected behavior (use user-provided or fallback to demo)
+            if expected_behavior:
+                expected_behavior_text = expected_behavior
+            else:
+                expected_behavior_text = (
+                    "Agent should correctly classify billing/subscription queries and route to appropriate handlers, "
+                    "providing accurate responses about cancellations and refunds."
+                )
 
             # Run analysis (orchestrator finds trace in cache)
             with console.status(
@@ -156,9 +205,9 @@ def chat(
                 complete_analysis = await orchestrator.analyze_failure(
                     trace_id=trace.trace_id,
                     project=trace.project_name,
-                    expected_behavior=expected_behavior,
-                    prompt_contents=None,  # Let orchestrator extract from trace
-                    eval_contents=None,
+                    expected_behavior=expected_behavior_text,
+                    prompt_contents=prompt_contents,
+                    eval_contents=eval_contents,
                 )
 
             console.print(
@@ -184,6 +233,10 @@ def chat(
                     console.print(
                         f"  - {hyp.id}: {hyp.description} (confidence: {hyp.confidence.value})"
                     )
+                    if hyp.example_before:
+                        console.print(f"    [dim]Current: {hyp.example_before}[/dim]")
+                    if hyp.example_after:
+                        console.print(f"    [dim]Expected: {hyp.example_after}[/dim]")
             else:
                 console.print("[yellow]⚠ No hypotheses generated[/yellow]")
 
@@ -251,6 +304,18 @@ def chat(
     help="Local trace JSON file to analyze",
 )
 @click.option(
+    "--prompts",
+    help="Path or glob pattern to prompt files (e.g., './prompts/*.txt')",
+)
+@click.option(
+    "--evals",
+    help="Path or glob pattern to eval/test files (e.g., './tests/*.py')",
+)
+@click.option(
+    "--expected-behavior",
+    help="Description of expected agent behavior",
+)
+@click.option(
     "--out", type=click.Path(), help="Output file for hypothesis pack (YAML/JSON)"
 )
 @click.option(
@@ -267,13 +332,16 @@ def analyze(
     trace_id: str,
     project: str,
     trace_file: str,
+    prompts: str,
+    evals: str,
+    expected_behavior: str,
     out: str,
     output_format: str,
     codebase: str,
 ):
     """Alias for 'chat' - analyze AI agent failures."""
     # Delegate to chat command
-    chat.callback(trace_id, project, trace_file, out, output_format, codebase)
+    chat.callback(trace_id, project, trace_file, prompts, evals, expected_behavior, out, output_format, codebase)
 
 
 @main.command()

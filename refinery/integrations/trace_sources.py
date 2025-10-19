@@ -74,6 +74,20 @@ class LocalFileSource(TraceSource):
         }
         return type_mapping.get(langsmith_type.lower(), RunType.CHAIN)
 
+    def _is_langsmith_format(self, data: Dict[str, Any]) -> bool:
+        """
+        Check if JSON data is in LangSmith format.
+
+        Returns:
+            True if data has LangSmith structure (trace_id, runs array)
+        """
+        return (
+            "trace_id" in data
+            and "runs" in data
+            and isinstance(data.get("runs"), list)
+            and len(data.get("runs", [])) > 0
+        )
+
     def _validate_trace_data(self, data: Dict[str, Any]) -> None:
         """Validate that JSON data has required LangSmith trace fields."""
         required_fields = ["trace_id", "runs"]
@@ -119,6 +133,10 @@ class LocalFileSource(TraceSource):
         """
         Parse trace from local JSON file.
 
+        Supports:
+        - LangSmith format (native parsing)
+        - Generic JSON formats (raw storage for GPT-5 to parse)
+
         Returns:
             Trace: Parsed trace data
 
@@ -129,50 +147,93 @@ class LocalFileSource(TraceSource):
         """
         logger.info("Loading trace from file", file_path=str(self.file_path))
 
+        # Read raw content for potential generic format storage
         try:
             with open(self.file_path, "r") as f:
-                data = json.load(f)
+                raw_content = f.read()
+                data = json.loads(raw_content)
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in trace file: {e}")
 
-        # Validate trace data structure
-        self._validate_trace_data(data)
+        # Detect format
+        is_langsmith = self._is_langsmith_format(data)
 
-        # Parse runs
-        runs = [self._parse_run(run_data) for run_data in data["runs"]]
+        if is_langsmith:
+            # LangSmith format: use existing parsing logic
+            logger.info("Detected LangSmith trace format")
+            self._validate_trace_data(data)
 
-        # Sort runs by dotted_order to maintain hierarchy
-        runs.sort(key=lambda x: x.dotted_order)
+            # Parse runs
+            runs = [self._parse_run(run_data) for run_data in data["runs"]]
 
-        # Extract trace metadata
-        trace_id = data["trace_id"]
-        project_name = data.get("project_name", data.get("session_id", "local"))
+            # Sort runs by dotted_order to maintain hierarchy
+            runs.sort(key=lambda x: x.dotted_order)
 
-        # Calculate start and end times
-        start_time = min(run.start_time for run in runs)
-        end_time = None
-        if all(run.end_time for run in runs):
-            end_time = max(run.end_time for run in runs if run.end_time)
+            # Extract trace metadata
+            trace_id = data["trace_id"]
+            project_name = data.get("project_name", data.get("session_id", "local"))
 
-        trace = Trace(
-            trace_id=trace_id,
-            project_name=project_name,
-            runs=runs,
-            start_time=start_time,
-            end_time=end_time,
-            metadata={
-                "total_runs": len(runs),
-                "source": "local_file",
-                "file_path": str(self.file_path),
-            },
-        )
+            # Calculate start and end times
+            start_time = min(run.start_time for run in runs)
+            end_time = None
+            if all(run.end_time for run in runs):
+                end_time = max(run.end_time for run in runs if run.end_time)
 
-        logger.info(
-            "Successfully loaded trace from file",
-            trace_id=trace_id,
-            run_count=len(runs),
-            file_path=str(self.file_path),
-        )
+            trace = Trace(
+                trace_id=trace_id,
+                project_name=project_name,
+                runs=runs,
+                start_time=start_time,
+                end_time=end_time,
+                metadata={
+                    "total_runs": len(runs),
+                    "source": "local_file",
+                    "file_path": str(self.file_path),
+                    "format": "langsmith",
+                },
+            )
+
+            logger.info(
+                "Successfully loaded LangSmith trace from file",
+                trace_id=trace_id,
+                run_count=len(runs),
+                file_path=str(self.file_path),
+            )
+
+        else:
+            # Generic format: store raw JSON for GPT-5 to parse
+            logger.info("Detected generic trace format (non-LangSmith)")
+
+            # Generate trace_id from filename or data
+            trace_id = (
+                data.get("trace_id")
+                or data.get("id")
+                or self.file_path.stem
+            )
+            project_name = data.get("project_name") or data.get("project") or "generic"
+
+            # Create minimal Trace with raw JSON in metadata
+            trace = Trace(
+                trace_id=trace_id,
+                project_name=project_name,
+                runs=[],  # Empty signals generic format
+                start_time=datetime.now(timezone.utc),
+                end_time=None,
+                metadata={
+                    "total_runs": 0,
+                    "source": "local_file",
+                    "file_path": str(self.file_path),
+                    "format": "generic",
+                    "raw_json_content": raw_content,  # Store raw JSON for vector store
+                },
+            )
+
+            logger.info(
+                "Successfully loaded generic trace from file",
+                trace_id=trace_id,
+                file_path=str(self.file_path),
+                note="Raw JSON will be passed to GPT-5 for parsing",
+            )
 
         return trace
 

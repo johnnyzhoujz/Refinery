@@ -49,20 +49,25 @@ async def test_local_file_source_parses_demo_trace():
 
 @pytest.mark.asyncio
 async def test_local_file_source_validates_schema():
-    """Test LocalFileSource validates required fields."""
+    """Test LocalFileSource handles non-LangSmith formats as generic traces."""
     import tempfile
 
-    # Create invalid trace file (missing required fields)
-    invalid_data = {"some_field": "value"}
+    # Create generic trace file (missing LangSmith-specific fields)
+    generic_data = {"some_field": "value", "id": "test123"}
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(invalid_data, f)
+        json.dump(generic_data, f)
         temp_path = f.name
 
     try:
         source = LocalFileSource(temp_path)
-        with pytest.raises(ValueError, match="missing required field"):
-            await source.fetch_trace()
+        trace = await source.fetch_trace()
+
+        # Verify it's detected as generic format
+        assert trace.metadata["format"] == "generic"
+        assert trace.runs == []  # Empty runs for generic format
+        assert "raw_json_content" in trace.metadata
+        assert trace.trace_id == "test123"  # Uses 'id' field from generic data
     finally:
         Path(temp_path).unlink()
 

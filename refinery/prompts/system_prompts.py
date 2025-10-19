@@ -899,10 +899,63 @@ Return ONLY valid JSON matching the exact schema provided. Include:
 Focus on evidence-based analysis grounded in the trace data. Quote specific run inputs/outputs to support findings.
 """
 
+# Trace Format Guidance for Generic Trace Support
+TRACE_FORMAT_GUIDANCE = """
+## Trace Format Handling
+
+You may encounter traces in different formats:
+
+**LangSmith Format (Structured Markdown):**
+- Well-organized with "Run 1:", "Run 2:" sections
+- Clear metadata: run_type, dotted_order, duration_ms
+- Inputs/outputs in structured JSON blocks
+- Error fields explicitly marked
+
+**Generic JSON Formats (Raw JSON in markdown code block):**
+The trace may be provided as raw JSON in various observability formats. Common patterns to look for:
+
+1. **OpenTelemetry GenAI:**
+   - Structure: `resourceSpans[]` with nested `scopeSpans[]` and `spans[]`
+   - Prompts in: `attributes["gen_ai.input.messages"]` or `attributes["gen_ai.prompt"]`
+   - Outputs in: `attributes["gen_ai.output.messages"]` or `attributes["gen_ai.completion"]`
+   - Errors in: `status.code`, `status.message`, `events[]` with exception info
+   - Timeline: `startTimeUnixNano`, `endTimeUnixNano` fields
+
+2. **Langfuse Format:**
+   - Structure: `observations[]` array with `type: "generation"` or `type: "span"`
+   - Prompts in: `input.messages` or `input.prompt`
+   - Outputs in: `output.completion` or `output.messages`
+   - Errors in: `level: "ERROR"`, `statusMessage`
+   - Timeline: `startTime`, `endTime` ISO timestamps
+
+3. **Custom/Generic JSON:**
+   - Look for: `trace_id`, `id`, `run_id`, or similar identifiers
+   - Prompts often in: `messages`, `inputs`, `prompt`, `input`, `request`
+   - Outputs often in: `outputs`, `response`, `completion`, `result`
+   - Errors in: `error`, `exception`, `status`, `failed`
+   - Timeline in: `timestamp`, `created_at`, `start_time`, `end_time`
+
+When analyzing generic JSON traces:
+- First, identify the overall structure (nested spans vs flat observations)
+- Map execution flow using timestamps or sequence numbers
+- Extract prompts/instructions from various possible field names
+- Track outputs and responses through the execution chain
+- Identify failures through error fields, status codes, or exception events
+- Build a chronological timeline even if the format differs from LangSmith
+
+Remember: The core analysis methodology remains the same regardless of format. Focus on:
+- What prompts/instructions were provided
+- What outputs were generated
+- Where behavior diverged from expectations
+- Whether the root cause is prompt quality, eval coverage, or business logic
+"""
+
 # Version 3: V2 + Interactive Responses API with Vector Store File Search
-FAILURE_ANALYST_SYSTEM_PROMPT_V3 = """Analyze LangSmith traces using vector store file search to identify why AI agents failed. Focus on systematic trace comprehension, prompt quality analysis, eval coverage assessment, and evidence-based diagnosis.
+FAILURE_ANALYST_SYSTEM_PROMPT_V3 = f"""Analyze AI agent traces using vector store file search to identify why agents failed. Focus on systematic trace comprehension, prompt quality analysis, eval coverage assessment, and evidence-based diagnosis.
 
 IMPORTANT: Most failures are NOT due to token limits. Modern models handle large contexts well. Focus on prompt quality, eval coverage, and business logic alignment. Only consider token issues when there's clear evidence (truncation markers, explicit errors, etc.).
+
+{TRACE_FORMAT_GUIDANCE}
 
 ## File Search Protocol (Interactive Responses API)
 
@@ -910,7 +963,7 @@ Use the file_search tool with bounded discipline:
 - Max 8 results per pass, max 6 passes total
 - Stop if a pass yields no new sections
 - Track coverage in your output: files_scanned[], runs_analyzed[], remaining[]
-- Cite evidence as {file: "name", section: "lines/description"}
+- Cite evidence as {{file: "name", section: "lines/description"}}
 
 ## Step 1: Prompt Quality Assessment (Primary Focus)
 
@@ -1055,20 +1108,23 @@ If retrieval is incomplete when stopping, explicitly state remaining items in co
 - [ ] Coverage explicitly tracked and reported"""
 
 # Stage-specific user prompts for 4-stage analysis
-STAGE1_TRACE_ANALYSIS_PROMPT_V1 = """Task: Produce an evidence-backed timeline of agent execution focusing on prompt quality and behavioral patterns.
+STAGE1_TRACE_ANALYSIS_PROMPT_V1 = f"""Task: Produce an evidence-backed timeline of agent execution focusing on prompt quality and behavioral patterns.
+
+{TRACE_FORMAT_GUIDANCE}
 
 File Search Protocol:
 1. Analyze prompt structure and clarity - system prompts, user instructions, examples
 2. Query for: "run", "tool", "input", "output", "error", "exception", "prompt", "instruction"
-3. Build timeline with prompt context and behavioral patterns
-4. Identify failure points and prompt-related anomalies
-5. Check token usage only if behavioral analysis is insufficient
-6. Track retrieval coverage (max 6 passes, 8 results each)
+3. For generic JSON traces, also search for format-specific fields (see Trace Format Handling above)
+4. Build timeline with prompt context and behavioral patterns
+5. Identify failure points and prompt-related anomalies
+6. Check token usage only if behavioral analysis is insufficient
+7. Track retrieval coverage (max 6 passes, 8 results each)
 
 Required Output (JSON only):
 - timeline[]: Ordered runs with inputs/outputs, tool calls, prompt context, and behavioral patterns
 - events[]: Failures, retries, anomalies with business impact and prompt correlation
-- coverage: Files scanned, runs analyzed, remaining items
+- coverage: Files scanned, runs analyzed, remaining items, trace_format detected
 - evidence[]: Supporting quotes with file citations
 - prompt_analysis: Quality assessment of prompts used
 

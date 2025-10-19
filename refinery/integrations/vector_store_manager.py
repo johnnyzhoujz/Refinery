@@ -181,6 +181,40 @@ class VectorStoreManager:
     ) -> str:
         """Create comprehensive trace file in markdown format for optimal retrieval."""
 
+        # Check if this is a generic format with raw JSON
+        if trace.metadata.get("raw_json_content"):
+            logger.info("Creating trace file with raw JSON content (generic format)")
+            raw_json = trace.metadata["raw_json_content"]
+
+            return f"""# Trace Analysis: {trace.trace_id}
+
+## Metadata
+- **Trace ID**: {trace.trace_id}
+- **Project**: {trace.project_name}
+- **Format**: Generic (non-LangSmith)
+- **Source**: {trace.metadata.get("file_path", "Unknown")}
+
+## Expected Behavior
+**Description**: {expectation.description}
+**Business Context**: {expectation.business_context or "Not specified"}
+**Specific Issues**: {expectation.specific_issues or "None specified"}
+**Expected Output**: {expectation.expected_output or "Not specified"}
+
+## Trace Data (Raw JSON)
+
+The trace data is provided below in its original JSON format. Please parse it to extract:
+- Execution flow and timeline
+- Prompts/messages sent to LLMs
+- Responses and outputs
+- Any errors or failures
+
+```json
+{raw_json}
+```
+"""
+
+        # LangSmith format: use structured markdown
+        logger.info("Creating trace file with LangSmith structured format")
         content = f"""# Trace Analysis: {trace.trace_id}
 
 ## Metadata
