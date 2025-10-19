@@ -30,8 +30,6 @@ refinery chat \
 ```
 
 Supported trace formats:
-- OpenTelemetry GenAI conventions
-- Langfuse observations
 - LangSmith exports
 - Custom JSON (auto-detected)
 
@@ -66,11 +64,11 @@ The challenge: error analysis is time-consuming, and existing tools lock you int
 - ✅ Not locked to any observability platform (LangSmith, Langfuse, OpenTelemetry, custom)
 - ✅ Bring your own traces, prompts, and evals
 
-**What Refinery does today (open source):**
+**What Refinery does today:**
 Analyzes failures and generates ranked hypotheses for potential fixes with confidence scores and evidence.
 
-**What Refinery will do in the future (not open source):**
-Provide an experiment lab environment to validate whether proposed fixes actually improve your agent system.
+**What Refinery will do in the future:**
+Provide an experiment lab environment to statistically prove whether proposed fixes actually improve your agent system.
 
 ---
 
@@ -89,18 +87,11 @@ Provide an experiment lab environment to validate whether proposed fixes actuall
 **Multi-source trace analysis:**
 - Local files: OpenTelemetry, Langfuse, LangSmith exports, custom JSON
 - LangSmith API: Live trace fetching with --trace-id (optional)
-- Auto-detection of trace format (generic vs LangSmith)
 
 **Flexible input:**
 - Bring your own prompts: --prompts flag with glob patterns
 - Bring your own evals: --evals flag for test files
 - Custom requirements: --expected-behavior for specific validation criteria
-
-**Recent additions (v0.1.0):**
-- Generic trace format support with raw JSON passthrough
-- Schema validation fixes (maxLength constraints)
-- Example field display in CLI and Streamlit UI
-- File loading utilities for local prompt/eval analysis
 
 **Developer experience:**
 - Structured exports: --out PATH --format yaml|json
