@@ -50,6 +50,11 @@ def main(debug: bool, config_file: str):
     help="Local trace JSON file to analyze",
 )
 @click.option(
+    "--provider",
+    type=click.Choice(["langsmith", "langfuse", "otlp", "local-file"], case_sensitive=False),
+    help="Trace provider (auto-detects if not specified)",
+)
+@click.option(
     "--prompts",
     help="Path or glob pattern to prompt files (e.g., './prompts/*.txt')",
 )
@@ -78,6 +83,7 @@ def chat(
     trace_id: str,
     project: str,
     trace_file: str,
+    provider: str,
     prompts: str,
     evals: str,
     expected_behavior: str,
@@ -89,6 +95,7 @@ def chat(
 
     async def run_chat():
         # Import here to avoid circular imports
+        from .core.trace_source_factory import TraceSourceFactory
         from .integrations.trace_sources import LangSmithAPISource, LocalFileSource
         from .interfaces.chat_interface import ChatInterface
         from .interfaces.chat_session import run_chat_session
@@ -100,13 +107,16 @@ def chat(
                 "[red]Error: Must provide either --trace-id or --trace-file[/red]"
             )
             console.print("\n[bold]Choose your workflow:[/bold]")
-            console.print("\n[cyan]1. LangSmith (native integration):[/cyan]")
+            console.print("\n[cyan]1. LangSmith (default):[/cyan]")
             console.print("   refinery chat --trace-id abc123 --project my-project")
             console.print("   [dim]Requires: LANGSMITH_API_KEY and OPENAI_API_KEY[/dim]")
-            console.print("\n[cyan]2. Local JSON file (any trace format):[/cyan]")
+            console.print("\n[cyan]2. Langfuse:[/cyan]")
+            console.print("   refinery chat --trace-id abc123 --provider langfuse")
+            console.print("   [dim]Requires: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and OPENAI_API_KEY[/dim]")
+            console.print("\n[cyan]3. Local OTLP file:[/cyan]")
             console.print("   refinery chat --trace-file trace.json --prompts ./prompts/ --evals ./tests/")
             console.print("   [dim]Requires: OPENAI_API_KEY only[/dim]")
-            console.print("   [dim]Supports: LangSmith, OpenTelemetry, Langfuse, custom JSON[/dim]")
+            console.print("   [dim]Supports: OpenTelemetry traces from Grafana Tempo, Honeycomb, etc.[/dim]")
             sys.exit(1)
 
         if trace_id and trace_file:
@@ -115,10 +125,10 @@ def chat(
             )
             sys.exit(1)
 
-        # Warn if using trace file without explicit prompts/evals
-        if trace_file and not prompts:
+        # Warn if using trace file without explicit prompts/evals (only for OTLP files)
+        if trace_file and not prompts and not provider:
             console.print(
-                "[yellow]Warning: No --prompts provided. Analysis may be limited without prompt context.[/yellow]"
+                "[yellow]Warning: No --prompts provided. OTLP traces may have limited prompt extraction.[/yellow]"
             )
 
         if trace_file and not evals:
@@ -126,17 +136,42 @@ def chat(
                 "[yellow]Warning: No --evals provided. Analysis will proceed without eval context.[/yellow]"
             )
 
-        # Lazy validation based on workflow
+        # Create trace provider using factory (multi-provider support)
         try:
-            if trace_id:
-                # LangSmith API workflow: need both LangSmith and OpenAI keys
+            # Validate configuration based on provider
+            config.validate_openai()  # Always need OpenAI
+
+            if provider:
+                # Explicit provider specified
+                if provider.lower() == "langfuse":
+                    # Langfuse requires its own credentials
+                    if not os.getenv("LANGFUSE_PUBLIC_KEY") or not os.getenv("LANGFUSE_SECRET_KEY"):
+                        raise ValueError(
+                            "Langfuse requires LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY environment variables"
+                        )
+                elif provider.lower() == "langsmith":
+                    config.validate_langsmith()
+                # OTLP/local-file don't need additional validation
+
+            elif trace_id and not provider:
+                # Default to LangSmith for trace IDs (backward compatibility)
                 config.validate_langsmith()
-                config.validate_openai()
-                trace_source = LangSmithAPISource(trace_id, project)
+
+            # Create provider using factory
+            trace_provider = TraceSourceFactory.create_for_cli(
+                provider=provider,
+                trace_id=trace_id,
+                file_path=trace_file,
+            )
+
+            # For backward compatibility with existing trace_source pattern
+            # Create a wrapper that mimics the old interface
+            if hasattr(trace_provider, 'fetch_trace'):
+                trace_source = trace_provider
             else:
-                # Local file workflow: only need OpenAI key
-                config.validate_openai()
-                trace_source = LocalFileSource(trace_file)
+                # Shouldn't happen but handle gracefully
+                trace_source = trace_provider
+
         except ValueError as e:
             console.print(f"[red]Configuration error: {e}[/red]")
             sys.exit(1)
@@ -169,10 +204,12 @@ def chat(
             from .core.orchestrator import create_orchestrator
 
             orchestrator = await create_orchestrator(
-                codebase, progress_callback=progress_callback
+                codebase,
+                progress_callback=progress_callback,
+                trace_provider=trace_provider,
             )
 
-            # Inject trace into orchestrator's cache to bypass LangSmith fetch
+            # Inject trace into orchestrator's cache to bypass additional fetch
             orchestrator._trace_cache[trace.trace_id] = trace
 
             # Load prompts and evals if provided

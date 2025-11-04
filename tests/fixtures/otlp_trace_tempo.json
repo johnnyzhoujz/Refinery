@@ -1,0 +1,126 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "test-service"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "1.0.0"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "opentelemetry.instrumentation.anthropic"
+          },
+          "spans": [
+            {
+              "traceId": "abc123",
+              "spanId": "span-1",
+              "name": "llm.call",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1736935200000000000",
+              "endTimeUnixNano": "1736935205000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.system",
+                  "value": {
+                    "stringValue": "anthropic"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-3"
+                  }
+                },
+                {
+                  "key": "gen_ai.input.messages",
+                  "value": {
+                    "stringValue": "[{\"role\": \"user\", \"content\": \"Hello\"}]"
+                  }
+                },
+                {
+                  "key": "gen_ai.output.messages",
+                  "value": {
+                    "stringValue": "[{\"role\": \"assistant\", \"content\": \"Hi there!\"}]"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": 10
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": 5
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              }
+            },
+            {
+              "traceId": "abc123",
+              "spanId": "span-2",
+              "parentSpanId": "span-1",
+              "name": "tool.call",
+              "kind": "SPAN_KIND_CLIENT",
+              "startTimeUnixNano": "1736935201000000000",
+              "endTimeUnixNano": "1736935203000000000",
+              "attributes": [
+                {
+                  "key": "tool.name",
+                  "value": {
+                    "stringValue": "calculator"
+                  }
+                },
+                {
+                  "key": "tool.input",
+                  "value": {
+                    "stringValue": "{\"operation\": \"add\", \"a\": 5, \"b\": 3}"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              }
+            },
+            {
+              "traceId": "abc123",
+              "spanId": "span-3",
+              "parentSpanId": "span-1",
+              "name": "chain.orchestrator",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1736935203500000000",
+              "endTimeUnixNano": "1736935204500000000",
+              "attributes": [
+                {
+                  "key": "chain.type",
+                  "value": {
+                    "stringValue": "sequential"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

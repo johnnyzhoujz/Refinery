@@ -1,0 +1,198 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "honeycomb-demo-service"
+            }
+          },
+          {
+            "key": "deployment.environment",
+            "value": {
+              "stringValue": "production"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "honeycomb-instrumentation",
+            "version": "0.2.0"
+          },
+          "spans": [
+            {
+              "traceId": "def456",
+              "spanId": "hc-span-root",
+              "name": "agent.workflow",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1737022800000000000",
+              "endTimeUnixNano": "1737022810000000000",
+              "attributes": [
+                {
+                  "key": "workflow.type",
+                  "value": {
+                    "stringValue": "customer_support"
+                  }
+                },
+                {
+                  "key": "workflow.version",
+                  "value": {
+                    "stringValue": "v2.1"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              }
+            },
+            {
+              "traceId": "def456",
+              "spanId": "hc-span-llm-1",
+              "parentSpanId": "hc-span-root",
+              "name": "llm.generate",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1737022801000000000",
+              "endTimeUnixNano": "1737022805000000000",
+              "attributes": [
+                {
+                  "key": "gen_ai.system",
+                  "value": {
+                    "stringValue": "openai"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "gpt-4"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.temperature",
+                  "value": {
+                    "doubleValue": 0.7
+                  }
+                },
+                {
+                  "key": "gen_ai.request.max_tokens",
+                  "value": {
+                    "intValue": 1000
+                  }
+                },
+                {
+                  "key": "gen_ai.prompt.0.role",
+                  "value": {
+                    "stringValue": "system"
+                  }
+                },
+                {
+                  "key": "gen_ai.prompt.0.content",
+                  "value": {
+                    "stringValue": "You are a helpful assistant."
+                  }
+                },
+                {
+                  "key": "gen_ai.completion.0.role",
+                  "value": {
+                    "stringValue": "assistant"
+                  }
+                },
+                {
+                  "key": "gen_ai.completion.0.content",
+                  "value": {
+                    "stringValue": "I'm ready to help!"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              }
+            },
+            {
+              "traceId": "def456",
+              "spanId": "hc-span-error",
+              "parentSpanId": "hc-span-root",
+              "name": "database.query",
+              "kind": "SPAN_KIND_CLIENT",
+              "startTimeUnixNano": "1737022806000000000",
+              "endTimeUnixNano": "1737022807000000000",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "postgresql"
+                  }
+                },
+                {
+                  "key": "db.query",
+                  "value": {
+                    "stringValue": "SELECT * FROM users WHERE id = $1"
+                  }
+                }
+              ],
+              "events": [
+                {
+                  "timeUnixNano": "1737022806500000000",
+                  "name": "exception",
+                  "attributes": [
+                    {
+                      "key": "exception.type",
+                      "value": {
+                        "stringValue": "DatabaseConnectionError"
+                      }
+                    },
+                    {
+                      "key": "exception.message",
+                      "value": {
+                        "stringValue": "Connection timeout: database unreachable"
+                      }
+                    },
+                    {
+                      "key": "exception.stacktrace",
+                      "value": {
+                        "stringValue": "at connect (db.py:42)\\nat query (db.py:89)"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_ERROR",
+                "message": "Database query failed"
+              }
+            },
+            {
+              "traceId": "def456",
+              "spanId": "hc-span-retry",
+              "parentSpanId": "hc-span-root",
+              "name": "retry.attempt",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1737022808000000000",
+              "endTimeUnixNano": "1737022809000000000",
+              "attributes": [
+                {
+                  "key": "retry.count",
+                  "value": {
+                    "intValue": 1
+                  }
+                },
+                {
+                  "key": "retry.success",
+                  "value": {
+                    "boolValue": true
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

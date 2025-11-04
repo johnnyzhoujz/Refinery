@@ -1,0 +1,96 @@
+{
+  "id": "trace-123",
+  "projectId": "test-project",
+  "observations": [
+    {
+      "id": "obs-1",
+      "name": "LLM Call",
+      "type": "GENERATION",
+      "startTime": "2025-01-15T10:00:00Z",
+      "endTime": "2025-01-15T10:00:05Z",
+      "input": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are helpful"
+          }
+        ]
+      },
+      "output": {
+        "content": "Hi there!"
+      },
+      "model": "gpt-4",
+      "usage": {
+        "promptTokens": 10,
+        "completionTokens": 5
+      }
+    },
+    {
+      "id": "obs-2",
+      "name": "Parent Chain",
+      "type": "SPAN",
+      "startTime": "2025-01-15T10:00:00Z",
+      "endTime": "2025-01-15T10:00:10Z",
+      "input": {
+        "query": "test query"
+      },
+      "output": {
+        "result": "success"
+      }
+    },
+    {
+      "id": "obs-3",
+      "name": "Tool Call",
+      "type": "TOOL",
+      "parentObservationId": "obs-2",
+      "startTime": "2025-01-15T10:00:01Z",
+      "endTime": "2025-01-15T10:00:03Z",
+      "input": {
+        "tool": "search",
+        "query": "test"
+      },
+      "output": {
+        "results": []
+      }
+    },
+    {
+      "id": "obs-4",
+      "name": "Nested LLM",
+      "type": "GENERATION",
+      "parentObservationId": "obs-2",
+      "startTime": "2025-01-15T10:00:04Z",
+      "endTime": "2025-01-15T10:00:08Z",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "nested call"
+          }
+        ]
+      },
+      "output": {
+        "content": "nested response"
+      },
+      "model": "gpt-3.5-turbo",
+      "usage": {
+        "promptTokens": 5,
+        "completionTokens": 3
+      },
+      "metadata": {
+        "promptName": "test-prompt",
+        "promptVersion": 1
+      }
+    },
+    {
+      "id": "obs-5",
+      "name": "Failed Event",
+      "type": "EVENT",
+      "startTime": "2025-01-15T10:00:11Z",
+      "endTime": "2025-01-15T10:00:12Z",
+      "input": {},
+      "output": {},
+      "level": "ERROR",
+      "statusMessage": "Connection timeout"
+    }
+  ]
+}

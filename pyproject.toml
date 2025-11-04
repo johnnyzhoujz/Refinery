@@ -47,6 +47,7 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.0",
+    "pytest-benchmark>=4.0",
     "black>=23.0",
     "ruff>=0.1",
     "mypy>=1.0",
@@ -82,3 +83,6 @@ disallow_untyped_defs = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+]

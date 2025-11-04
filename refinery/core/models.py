@@ -264,3 +264,11 @@ class HypothesisRequest(BaseModel):
     code_context: CodeContext
     constraints: List[str] = Field(default_factory=list)
     preferred_approach: Optional[str] = None
+
+
+@dataclass
+class PromptData:
+    """Container for extracted prompts from a trace."""
+
+    system_prompts: List[str] = field(default_factory=list)
+    user_prompts: List[str] = field(default_factory=list)

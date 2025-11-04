@@ -76,6 +76,11 @@ class RefineryConfig:
     langsmith_api_key: str
     langsmith_api_url: str = "https://api.smith.langchain.com"
 
+    # Langfuse
+    langfuse_public_key: Optional[str] = None
+    langfuse_secret_key: Optional[str] = None
+    langfuse_host: str = "https://cloud.langfuse.com"
+
     # LLM Configuration
     llm_provider: str = "openai"  # openai, anthropic, azure_openai, gemini
 
@@ -129,6 +134,9 @@ class RefineryConfig:
             langsmith_api_url=os.getenv(
                 "LANGSMITH_API_URL", "https://api.smith.langchain.com"
             ),
+            langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+            langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+            langfuse_host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
             llm_provider=os.getenv("LLM_PROVIDER", "openai"),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4o"),
@@ -169,6 +177,17 @@ class RefineryConfig:
             raise ValueError(
                 "LANGSMITH_API_KEY is required for fetching traces from LangSmith API.\n"
                 "To analyze local trace files instead, use: refinery chat --trace-file <file>"
+            )
+
+    def validate_langfuse(self) -> None:
+        """Validate Langfuse configuration (optional)."""
+        if self.langfuse_public_key and not self.langfuse_secret_key:
+            raise ValueError(
+                "LANGFUSE_SECRET_KEY is required when LANGFUSE_PUBLIC_KEY is provided"
+            )
+        if self.langfuse_secret_key and not self.langfuse_public_key:
+            raise ValueError(
+                "LANGFUSE_PUBLIC_KEY is required when LANGFUSE_SECRET_KEY is provided"
             )
 
     def validate_openai(self) -> None:

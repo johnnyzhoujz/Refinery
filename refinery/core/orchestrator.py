@@ -33,9 +33,10 @@ class RefineryOrchestrator:
         self,
         codebase_path: str,
         progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        trace_provider: Optional[Any] = None,
     ):
         self.codebase_path = codebase_path
-        self.langsmith_client = None
+        self.trace_provider = trace_provider  # Provider-agnostic: supports LangSmith, Langfuse, OTLP
         self.llm_provider = create_llm_provider()
         self.code_manager = SafeCodeManager(codebase_path)
         self.analysis_seed = getattr(config, "analysis_seed", None)
@@ -52,15 +53,21 @@ class RefineryOrchestrator:
         # Caches for single-fetch invariants
         self._trace_cache: Dict[str, Trace] = {}
         self._prompt_eval_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]] = {}
-        self._langsmith_fetch_count: int = 0
+        self._trace_fetch_count: int = 0  # Renamed from _langsmith_fetch_count
         self._progress_callback = progress_callback
+        self._prompt_extractor = None  # Initialized in _init_async()
 
     # Removed AgentContextResolver - using simple file passing instead
 
     async def _init_async(self):
         """Initialize async components."""
-        if self.langsmith_client is None:
-            self.langsmith_client = await create_langsmith_client()
+        # Initialize trace provider (backward compatible: defaults to LangSmith)
+        if self.trace_provider is None:
+            self.trace_provider = await create_langsmith_client()
+
+        # Initialize prompt extractor with the trace provider
+        from .prompt_extraction import MultiStrategyPromptExtractor
+        self._prompt_extractor = MultiStrategyPromptExtractor(self.trace_provider)
 
     async def analyze_failure(
         self,
@@ -82,12 +89,12 @@ class RefineryOrchestrator:
         # Initialize async components
         await self._init_async()
 
-        # 1. Fetch trace from LangSmith (single-fetch invariant)
-        self._langsmith_fetch_count = 0
+        # 1. Fetch trace from provider (single-fetch invariant)
+        self._trace_fetch_count = 0
         trace, cache_hit = await self._get_or_fetch_trace(trace_id)
         logger.info("Fetched trace", runs_count=len(trace.runs), cache_hit=cache_hit)
-        trace.metadata["langsmith_fetch_count"] = self._langsmith_fetch_count
-        trace.metadata["langsmith_cache_hit"] = cache_hit
+        trace.metadata["trace_fetch_count"] = self._trace_fetch_count
+        trace.metadata["trace_cache_hit"] = cache_hit
         trace.metadata["analysis_seed"] = self.analysis_seed
 
         # 2. Log provided files only when overrides supplied
@@ -222,7 +229,7 @@ class RefineryOrchestrator:
     def get_run_metadata(self) -> Dict[str, Any]:
         """Expose run metadata such as fetch counts and seed."""
         return {
-            "langsmith_fetch_count": self._langsmith_fetch_count,
+            "trace_fetch_count": self._trace_fetch_count,
             "analysis_seed": self.analysis_seed,
         }
 
@@ -236,8 +243,8 @@ class RefineryOrchestrator:
         if trace_id in self._trace_cache:
             return self._trace_cache[trace_id], True
 
-        trace = await self.langsmith_client.fetch_trace(trace_id)
-        self._langsmith_fetch_count += 1
+        trace = await self.trace_provider.fetch_trace(trace_id)
+        self._trace_fetch_count += 1
         self._trace_cache[trace_id] = trace
         return trace, False
 
@@ -274,15 +281,15 @@ class RefineryOrchestrator:
             trace_id=trace.trace_id,
             prompt_files=len(resolved_prompts),
             eval_files=len(resolved_evals),
-            source="provided" if provided_prompts or provided_evals else "langsmith",
+            source="provided" if provided_prompts or provided_evals else "extracted",
         )
         return resolved_prompts, resolved_evals
 
     def _extract_prompt_eval_bundle(
         self, trace: Trace
     ) -> Tuple[Dict[str, str], Dict[str, str]]:
-        """Extract prompt/eval content from LangSmith trace."""
-        extracted = self.langsmith_client.extract_prompts_from_trace(trace)
+        """Extract prompt/eval content from trace using multi-strategy extractor."""
+        extracted = self._prompt_extractor.extract_prompts_from_trace(trace)
 
         prompt_files: Dict[str, str] = {}
         eval_files: Dict[str, str] = {}
@@ -479,11 +486,14 @@ class RefineryOrchestrator:
 async def create_orchestrator(
     codebase_path: str,
     progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    trace_provider: Optional[Any] = None,
 ) -> RefineryOrchestrator:
     """Factory function to create an orchestrator."""
     orchestrator = RefineryOrchestrator(
-        codebase_path, progress_callback=progress_callback
+        codebase_path,
+        progress_callback=progress_callback,
+        trace_provider=trace_provider,
     )
-    # Ensure async dependencies (e.g., LangSmith client) are initialized
+    # Ensure async dependencies (e.g., trace provider, prompt extractor) are initialized
     await orchestrator._init_async()
     return orchestrator
