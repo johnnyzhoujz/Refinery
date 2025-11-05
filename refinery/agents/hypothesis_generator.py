@@ -1106,6 +1106,10 @@ General Best Practices:
         model_guide: str,
     ) -> str:
         """Build prompt for generating trace-based hypothesis."""
+        # Extract join operations to avoid backslashes in f-string expressions (Python 3.11 compatibility)
+        prompts_text = chr(10).join([f"{p}\n" for p in original_prompts[:10]])
+        practices_text = chr(10).join([f"- {bp.get('title', '')}: {bp.get('description', '')}" for bp in best_practices[:5]])
+
         return f"""
 ## DIAGNOSIS
 Root Cause: {diagnosis.root_cause}
@@ -1114,13 +1118,13 @@ Evidence: {diagnosis.evidence}
 Confidence: {diagnosis.confidence.value}
 
 ## SYSTEM PROMPTS ({len(original_prompts)} total)
-{chr(10).join([f"{p}\n" for p in original_prompts[:10]])}
+{prompts_text}
 
 ## MODEL-SPECIFIC GUIDE
 {model_guide}
 
 ## BEST PRACTICES
-{chr(10).join([f"- {bp.get('title', '')}: {bp.get('description', '')}" for bp in best_practices[:5]])}
+{practices_text}
 
 Output Requirements:
 - Return valid JSON that matches the schema exactly.
