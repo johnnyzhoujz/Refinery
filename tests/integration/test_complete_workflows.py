@@ -19,6 +19,7 @@ from refinery.core.models import Trace, PromptData
 from refinery.integrations.local_file_provider import LocalFileTraceProvider
 from refinery.integrations.langfuse_client import LangfuseClient
 from refinery.integrations.langsmith_client_simple import SimpleLangSmithClient
+from refinery.utils.config import config
 
 
 @pytest.fixture
@@ -38,14 +39,12 @@ class TestTraceSourceFactoryIntegration:
 
     def test_create_langsmith_provider(self):
         """Test LangSmith provider creation."""
-        with patch.dict('os.environ', {'LANGCHAIN_API_KEY': 'test-key'}):
+        with patch.object(config, 'langsmith_api_key', 'test-key'):
             provider = TraceSourceFactory.create_from_provider("langsmith")
             assert isinstance(provider, SimpleLangSmithClient)
 
     def test_create_langfuse_provider(self):
         """Test Langfuse provider creation."""
-        from refinery.utils.config import config
-
         with patch.object(config, 'langfuse_public_key', 'pk-test'), \
              patch.object(config, 'langfuse_secret_key', 'sk-test'):
             provider = TraceSourceFactory.create_from_provider("langfuse")
@@ -68,7 +67,7 @@ class TestTraceSourceFactoryIntegration:
 
     def test_cli_defaults_to_langsmith_for_trace_id(self):
         """Test backward compatibility: trace_id defaults to LangSmith."""
-        with patch.dict('os.environ', {'LANGCHAIN_API_KEY': 'test-key'}):
+        with patch.object(config, 'langsmith_api_key', 'test-key'):
             provider = TraceSourceFactory.create_for_cli(trace_id="abc123")
             assert isinstance(provider, SimpleLangSmithClient)
 
@@ -239,14 +238,14 @@ class TestBackwardCompatibility:
 
     def test_langsmith_default_provider(self):
         """Test LangSmith is still the default provider."""
-        with patch.dict('os.environ', {'LANGCHAIN_API_KEY': 'test-key'}):
+        with patch.object(config, 'langsmith_api_key', 'test-key'):
             # No provider specified, should default to LangSmith
             provider = TraceSourceFactory.create_for_cli()
             assert isinstance(provider, SimpleLangSmithClient)
 
     def test_langsmith_trace_id_workflow(self):
         """Test trace_id alone defaults to LangSmith (backward compatibility)."""
-        with patch.dict('os.environ', {'LANGCHAIN_API_KEY': 'test-key'}):
+        with patch.object(config, 'langsmith_api_key', 'test-key'):
             provider = TraceSourceFactory.create_for_cli(trace_id="abc123")
             assert isinstance(provider, SimpleLangSmithClient)
 
