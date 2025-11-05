@@ -54,6 +54,31 @@ dev = [
     "pre-commit>=3.0",
 ]
 
+# Optional integrations
+langfuse = [
+    "langfuse>=2.0",
+]
+
+schema-validation = [
+    "jsonschema>=4.0",
+]
+
+# All optional integrations
+all = [
+    "langfuse>=2.0",
+    "jsonschema>=4.0",
+]
+
+# Test dependencies (includes all optional deps needed for full test suite)
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "pytest-benchmark>=4.0",
+    "langfuse>=2.0",
+    "jsonschema>=4.0",
+]
+
 [project.scripts]
 refinery = "refinery.cli:main"
 

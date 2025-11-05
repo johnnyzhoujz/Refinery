@@ -9,7 +9,12 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from langfuse import Langfuse
+try:
+    from langfuse import Langfuse
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    Langfuse = None  # type: ignore
 
 from ..core.interfaces import TraceProvider
 from ..core.models import Trace, TraceRun, RunType
@@ -24,6 +29,12 @@ class LangfuseClient(TraceProvider):
 
     def __init__(self):
         """Initialize Langfuse client with credentials from config."""
+        if not LANGFUSE_AVAILABLE:
+            raise ImportError(
+                "Langfuse integration requires the 'langfuse' package. "
+                "Install with: pip install 'refinery-cli[langfuse]' or pip install 'refinery-cli[all]'"
+            )
+
         if not config.langfuse_public_key or not config.langfuse_secret_key:
             raise ValueError(
                 "Langfuse requires public_key and secret_key. "
