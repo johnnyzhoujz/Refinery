@@ -7,9 +7,11 @@ enabling tests to run without API calls or environment variables.
 
 import os
 from typing import Any, Dict
+from unittest.mock import patch
 
 import pytest
 
+from refinery.utils.config import config
 from tests.mocks.langsmith_mock import MockLangSmithClient, create_mock_trace_data
 from tests.mocks.llm_mock import (
     MockLLMProvider,
@@ -203,6 +205,23 @@ def preserve_env():
     yield
     os.environ.clear()
     os.environ.update(original_env)
+
+
+@pytest.fixture(autouse=True)
+def mock_llm_config():
+    """
+    Automatically provide OpenAI API key for all tests.
+
+    This allows tests that instantiate RefineryOrchestrator to run without
+    real API credentials in CI environments. The orchestrator eagerly initializes
+    the LLM provider in __init__, which validates the OpenAI key even if the
+    test never uses LLM functionality.
+
+    Tests that actually need to test LLM behavior can override this fixture
+    or provide their own mocks.
+    """
+    with patch.object(config, 'openai_api_key', 'test-key-for-ci'):
+        yield
 
 
 # Mark for live tests that require API keys
