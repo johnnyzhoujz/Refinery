@@ -59,6 +59,13 @@ langfuse = [
     "langfuse>=2.0",
 ]
 
+ui = [
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "sse-starlette>=2.0.0",
+    "python-multipart>=0.0.9",
+]
+
 schema-validation = [
     "jsonschema>=4.0",
 ]
@@ -67,6 +74,10 @@ schema-validation = [
 all = [
     "langfuse>=2.0",
     "jsonschema>=4.0",
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "sse-starlette>=2.0.0",
+    "python-multipart>=0.0.9",
 ]
 
 # Test dependencies (includes all optional deps needed for full test suite)

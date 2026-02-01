@@ -382,42 +382,62 @@ def analyze(
 
 
 @main.command()
-def ui():
-    """Launch Streamlit UI."""
-    import subprocess
-    import sys
-    from pathlib import Path
-
-    # Set environment to skip Streamlit welcome screen
-    env = os.environ.copy()
-    env["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
-
-    console.print("[blue]🔬 Launching Refinery Web UI...[/blue]")
-    console.print("[dim]Starting server and opening browser...[/dim]")
-
-    ui_path = Path(__file__).parent / "ui" / "app.py"
+@click.option("--port", default=8000, help="Port to run the UI server on")
+@click.option("--host", default="127.0.0.1", help="Host to run the UI server on")
+@click.option("--mock/--no-mock", default=False, help="Run in mock mode with fake data")
+def ui(port: int, host: str, mock: bool):
+    """Launch Refinery Web UI."""
+    if mock:
+        os.environ["REFINERY_MOCK_MODE"] = "true"
+        console.print("[yellow]🚧 Running in MOCK MODE - No API keys required[/yellow]")
 
     try:
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "streamlit",
-                "run",
-                str(ui_path),
-                "--server.headless=false",
-                "--browser.gatherUsageStats=false",
-                "--global.showWarningOnDirectExecution=false",
-            ],
-            env=env,
-        )
+        import uvicorn
+        import fastapi
+        import sse_starlette
+    except ImportError:
+        console.print("[red]Error: UI dependencies not installed.[/red]")
+        console.print("[blue]Please run: pip install -e .[ui][/blue]")
+        sys.exit(1)
+
+    import webbrowser
+    from pathlib import Path
+
+    console.print(f"[blue]🔬 Launching Refinery Web UI at http://{host}:{port}...[/blue]")
+    console.print("[dim]Press Ctrl+C to stop.[/dim]")
+
+    # Open browser after a short delay
+    async def open_browser():
+        await asyncio.sleep(1.5)
+        webbrowser.open(f"http://{host}:{port}")
+
+    # We need to run the server. Since uvicorn.run is blocking, we can't easily await open_browser
+    # unless we run uvicorn programmatically or use a thread.
+    # Simple approach: just open browser first (it might fail if server not ready immediately, but usually fine)
+    # or print the URL.
+    
+    # Let's try to run uvicorn directly.
+    # We need to point to the app string "refinery.ui.server:app"
+    
+    try:
+        # Open browser in a separate thread/process slightly delayed? 
+        # Actually, let's just print the URL. Users can click it.
+        # But for UX, let's try opening it.
+        import threading
+        import time
+        def open_url():
+            time.sleep(1)
+            webbrowser.open(f"http://{host}:{port}")
+        
+        threading.Thread(target=open_url, daemon=True).start()
+
+        uvicorn.run("refinery.ui.server:app", host=host, port=port, reload=False)
+        
     except KeyboardInterrupt:
         console.print("[yellow]UI server stopped.[/yellow]")
     except Exception as e:
         console.print(f"[red]Error launching UI: {e}[/red]")
-        console.print(
-            "[blue]Try running manually: streamlit run refinery/ui/app.py[/blue]"
-        )
+
 
 
 if __name__ == "__main__":

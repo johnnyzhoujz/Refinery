@@ -11,3 +11,6 @@ include README.md
 include LICENSE
 include CONTRIBUTING.md
 include CODE_OF_CONDUCT.md
+
+# Include built UI
+recursive-include refinery/ui/frontend/dist *

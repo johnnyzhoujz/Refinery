@@ -49,6 +49,20 @@ MODEL_CONFIGS = {
             "output_limit": 16_384,
             "best_for": "balanced speed/cost for coding",
         },
+        "gpt52-pro": {
+            "model": "gpt-5.2-pro",
+            "context_window": 500_000,
+            "recommended_max_input": 450_000,
+            "output_limit": 32_000,
+            "best_for": "complex professional knowledge work",
+        },
+        "gpt52-thinking": {
+            "model": "gpt-5.2-thinking",
+            "context_window": 256_000,
+            "recommended_max_input": 200_000,
+            "output_limit": 64_000,
+            "best_for": "deep reasoning and agentic execution",
+        },
     },
     "anthropic": {
         "claude-3.7-sonnet": {
@@ -158,6 +172,11 @@ def should_truncate(trace_tokens: int, model_config: Dict[str, Any]) -> bool:
 def get_recommended_models_for_refinery() -> List[Dict[str, Any]]:
     """Get recommended models for Refinery's code analysis use case."""
     return [
+        {
+            "provider": "openai",
+            "model": "gpt-5.2-thinking",
+            "reason": "State-of-the-art agentic reasoning with reduced hallucination",
+        },
         {
             "provider": "gemini",
             "model": "gemini-2.5-pro",
